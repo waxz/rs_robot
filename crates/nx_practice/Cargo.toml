@@ -1,0 +1,52 @@
+[package]
+name = "nx_practice"
+version = "0.1.0"
+edition = "2021"
+#build = "build.rs"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rerun = { version = "0.10.1",features = ["web_viewer"] }
+re_viewer = {version = "0.10.1"}
+re_sdk = {version = "0.10.1"}
+re_ws_comms = {version = "0.10.1"}
+
+
+bytes = "1.3"
+anyhow = "1.0"
+clap = { version = "4.0", features = ["derive"] }
+gltf = "1.1"
+mimalloc = "0.1"
+itertools = "0.11.0"
+rand = "0.8.5"
+ndarray = "0.15.6"
+socket2 = "0.5.5"
+toml = "0.8.6"
+signal-hook = "0.3.17"
+time = "0.3.30"
+tokio = {version = "1.33.0",features = ["full"] }
+rayon = "1.8"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tracing-appender = "0.2.0"
+paho-mqtt = "0.12.3"
+rumqttc = "0.23.0"
+
+
+
+nx_common = {path = "../nx_common"}
+log = "0.4.20"
+
+[build-dependencies]
+bindgen = "0.65.1"
+cc = "1.0"
+cmake = "0.1"
+
+
+#warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+#[profile.release]
+#opt-level = "z" # oprimize for size
+#lto = true      #enable link time optimization
+#codegen-units = 1  #reduce number of codegen units to increase optimization
+#panic = "abort"    # abort on panic
+#strip = true       #automatic strip symbols from the binary
