@@ -10,7 +10,8 @@ use std::thread;
 
 use nx_common::common::signal_handler::SignalHandler;
 
-fn main() -> io::Result<()> {
+fn main() -> io::Result<()>
+{
     let signal_handler = SignalHandler::default();
 
     // Create a TCP listener bound to two addresses.

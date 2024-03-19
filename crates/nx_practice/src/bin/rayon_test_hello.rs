@@ -7,7 +7,8 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use tokio::signal::unix::signal;
 
-fn sum_of_squares(input: &[i32]) -> i32 {
+fn sum_of_squares(input: &[i32]) -> i32
+{
     input
         .par_iter() // <-- just change that!
         .map(|&i| i * i)
@@ -15,13 +16,15 @@ fn sum_of_squares(input: &[i32]) -> i32 {
 }
 
 #[test]
-fn spwan() {
+fn spwan()
+{
     rayon::spawn(|| {
         println!("spawn 1");
     });
 }
 #[test]
-fn test_sum() {
+fn test_sum()
+{
     let v1 = [1, 2, 3, 4, 5, 6];
     let sum = sum_of_squares(&v1);
 
@@ -36,7 +39,8 @@ fn test_sum() {
     println!("{}", n);
 }
 
-fn fib(n: usize) -> usize {
+fn fib(n: usize) -> usize
+{
     if n == 0 || n == 1 {
         return n;
     }
@@ -44,7 +48,8 @@ fn fib(n: usize) -> usize {
     return a + b;
 }
 
-fn main() -> io::Result<()> {
+fn main() -> io::Result<()>
+{
     let signal_handler = SignalHandler::default();
 
     let pool = rayon::ThreadPoolBuilder::new()
@@ -58,7 +63,6 @@ fn main() -> io::Result<()> {
     let t = rayon::spawn(|| {
         println!("run");
     });
-
 
     Ok(())
 }

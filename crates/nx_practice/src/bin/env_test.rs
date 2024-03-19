@@ -1,6 +1,7 @@
 use std::env;
 //https://www.thorsten-hans.com/working-with-environment-variables-in-rust/
-fn main() {
+fn main()
+{
     for (n, v) in env::vars() {
         println!("{}: {}", n, v);
     }

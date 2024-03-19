@@ -1,4 +1,5 @@
 use nx_common::common::signal_handler::SignalHandler;
+use nx_common::common::socket_client::SocketClient;
 use socket2::{Domain, Socket, Type};
 use std::io;
 use std::io::Read;
@@ -40,40 +41,25 @@ fn main() -> io::Result<()>
 
     let addr = "127.0.0.1:12345".parse::<SocketAddr>().unwrap().into();
 
-    let mut socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
-    match socket.connect_timeout(&addr, Duration::from_millis(250)) {
-        Ok(_) => println!("success"),
-        Err(ref err) if err.kind() == io::ErrorKind::TimedOut => {}
-        Err(err) => println!("unexpected error {}", err),
-    }
+    let mut client = SocketClient::new(&addr);
+
     let mut input = format!("hello from socket2 client");
     let mut buf = [0; 512];
 
     while signal_handler.is_run() {
-        let mut socket_error = false;
-        match socket.send(input.as_bytes()) {
-            Ok(_) => match socket.read(&mut buf) {
-                Ok(recv_len) => {
-                    println!("read ok, len: {}, buf: {:?}", recv_len, &buf[0..10]);
-                }
-                Err(e) => {
-                    socket_error = true;
-                }
-            },
+        match client.send(input.as_bytes()) {
+            Ok(_) => {}
             Err(e) => {
-                socket_error = true;
+                println!("error: {}", e);
             }
-        };
-
-        if socket_error {
-            println!("try reconnect");
-            match socket.connect_timeout(&addr, Duration::from_millis(1000)) {
-                Ok(_) => println!("success"),
-                Err(ref err) if err.kind() == io::ErrorKind::TimedOut => {}
-                Err(err) => println!("unexpected error {}", err),
-            }
-            std::thread::sleep(std::time::Duration::from_millis(500));
         }
+        match client.read(&mut buf) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("error: {}", e);
+            }
+        }
+
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 

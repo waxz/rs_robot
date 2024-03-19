@@ -11,7 +11,8 @@ macro_rules! log {
 }
 
 #[allow(dead_code)]
-fn gcc_simple(source: &str, libname: &str) {
+fn gcc_simple(source: &str, libname: &str)
+{
     let out_dir = env::var("OUT_DIR").unwrap();
 
     Command::new("gcc")
@@ -45,7 +46,8 @@ where
     }
 }
 #[allow(dead_code)]
-fn cmake_simple(source: &str, shared: bool, libname_list: &[&str]) {
+fn cmake_simple(source: &str, shared: bool, libname_list: &[&str])
+{
     let outdir = env::var("OUT_DIR").expect("OUT_DIR is not set");
 
     let source_path = Path::new(source);
@@ -92,7 +94,8 @@ fn cmake_simple(source: &str, shared: bool, libname_list: &[&str]) {
 }
 
 #[allow(dead_code)]
-fn build_use_cc() {
+fn build_use_cc()
+{
     cc::Build::new()
         .file("cpp/cpp_liba.cpp")
         .cpp(true)
@@ -101,7 +104,8 @@ fn build_use_cc() {
 }
 
 #[allow(dead_code)]
-fn buld_use_rust_cmake_config() {
+fn buld_use_rust_cmake_config()
+{
     use cmake::Config;
 
     let dst = Config::new("cpp")
@@ -110,7 +114,8 @@ fn buld_use_rust_cmake_config() {
         .build();
     println!("cargo:rustc-link-search=native={}", dst.display());
 }
-fn main() {
+fn main()
+{
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=wrapper.h");
     std::env::set_var("REBUILD", format!("{:?}", std::time::Instant::now()));
