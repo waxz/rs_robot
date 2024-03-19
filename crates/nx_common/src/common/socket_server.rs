@@ -1,12 +1,11 @@
-use ndarray::s;
 use socket2::{Domain, SockAddr, Socket, Type};
-use std::collections::vec_deque::IterMut;
 use std::collections::VecDeque;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-pub struct SocketServer {
+pub struct SocketServer
+{
     addr: SockAddr,
     listener: TcpListener,
     pub listen_thread: Option<std::thread::JoinHandle<()>>,
@@ -16,11 +15,13 @@ pub struct SocketServer {
     pub stream_vec: Arc<Mutex<VecDeque<TcpStream>>>,
 }
 
-impl SocketServer {
-    pub fn new(addr: &SockAddr) -> Self {
+impl SocketServer
+{
+    pub fn new(addr: &SockAddr) -> Self
+    {
         let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
-        socket.bind(addr);
-        socket.listen(128);
+        socket.bind(addr).unwrap();
+        socket.listen(128).unwrap();
 
         SocketServer {
             addr: addr.clone(),
@@ -33,15 +34,18 @@ impl SocketServer {
         }
     }
 
-    pub fn new_arc(addr: &SockAddr) -> Arc<Mutex<SocketServer>> {
+    pub fn new_arc(addr: &SockAddr) -> Arc<Mutex<SocketServer>>
+    {
         Arc::new(Mutex::new(SocketServer::new(&addr)))
     }
 
-    pub fn get_stream(&mut self) -> MutexGuard<'_, VecDeque<TcpStream>> {
+    pub fn get_stream(&mut self) -> MutexGuard<'_, VecDeque<TcpStream>>
+    {
         self.stream_vec.lock().unwrap()
     }
 
-    pub fn listen(&mut self) {
+    pub fn listen(&mut self)
+    {
         println!("[server]: start thread");
         let is_run = self.is_run.clone();
         is_run.store(true, Ordering::Relaxed);
@@ -58,7 +62,7 @@ impl SocketServer {
                         println!("recv incoming connection from :{}", peer_addr);
                         stream_vec.lock().unwrap().push_back(stream);
 
-                        if (stream_vec.lock().unwrap().len() > 5) {
+                        if stream_vec.lock().unwrap().len() > 5 {
                             stream_vec.lock().unwrap().pop_front();
                             println!("remove old connection");
                         }
@@ -72,7 +76,8 @@ impl SocketServer {
         }));
     }
 
-    pub fn start_listen(this: &mut Arc<Mutex<SocketServer>>) {
+    pub fn start_listen(this: &mut Arc<Mutex<SocketServer>>)
+    {
         let copy = this.clone();
 
         println!("[server]: start thread");
@@ -92,7 +97,7 @@ impl SocketServer {
                         println!("recv incoming connection from :{}", peer_addr);
                         stream_vec.lock().unwrap().push_back(stream);
 
-                        if (stream_vec.lock().unwrap().len() > 5) {
+                        if stream_vec.lock().unwrap().len() > 5 {
                             stream_vec.lock().unwrap().pop_front();
                             println!("remove old connection");
                         }
@@ -106,7 +111,8 @@ impl SocketServer {
         }));
     }
 
-    pub fn stop(&mut self) {
+    pub fn stop(&mut self)
+    {
         println!("[server]: stop");
         self.is_run.store(false, Ordering::Relaxed);
         let mut socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
@@ -118,13 +124,13 @@ impl SocketServer {
     }
 }
 
-impl Drop for SocketServer {
-    fn drop(&mut self) {
+impl Drop for SocketServer
+{
+    fn drop(&mut self)
+    {
         if let Some(handle) = self.listen_thread.take() {
             handle.join().unwrap();
         } else {
         };
-
-
     }
 }

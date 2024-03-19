@@ -1,21 +1,19 @@
-use ndarray::s;
 use socket2::{Domain, SockAddr, Socket, Type};
-use std::collections::VecDeque;
 use std::io;
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use std::io::Read;
 
-pub struct SocketClient {
+pub struct SocketClient
+{
     addr: SockAddr,
     socket: Socket,
 }
 
-impl SocketClient {
-    pub fn new(addr: &SockAddr) -> Self {
+impl SocketClient
+{
+    pub fn new(addr: &SockAddr) -> Self
+    {
         let mut socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
         match socket.connect_timeout(&addr, Duration::from_millis(250)) {
             Ok(_) => println!("success"),
@@ -29,7 +27,8 @@ impl SocketClient {
         }
     }
 
-    pub fn reconnect(&mut self) {
+    pub fn reconnect(&mut self)
+    {
         println!("try reconnect");
         match self
             .socket
@@ -41,7 +40,8 @@ impl SocketClient {
         }
     }
 
-    pub fn send(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+    pub fn send(&mut self, buffer: &[u8]) -> std::io::Result<usize>
+    {
         let ret = self.socket.send(buffer);
 
         match &ret {
@@ -53,7 +53,8 @@ impl SocketClient {
         ret
     }
 
-    pub fn read(&mut self, mut buffer: &mut [u8]) -> std::io::Result<usize> {
+    pub fn read(&mut self, mut buffer: &mut [u8]) -> std::io::Result<usize>
+    {
         let ret = self.socket.read(&mut buffer);
         match &ret {
             Ok(_) => {}

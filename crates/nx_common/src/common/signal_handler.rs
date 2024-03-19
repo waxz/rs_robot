@@ -1,12 +1,15 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-pub struct SignalHandler {
+pub struct SignalHandler
+{
     term: Arc<AtomicBool>,
 }
 
-impl Default for SignalHandler {
-    fn default() -> Self {
+impl Default for SignalHandler
+{
+    fn default() -> Self
+    {
         let s = SignalHandler {
             term: Arc::new(AtomicBool::new(false)),
         };
@@ -17,16 +20,24 @@ impl Default for SignalHandler {
     }
 }
 
-impl Clone for SignalHandler {
-    fn clone(&self) -> Self {
+impl Clone for SignalHandler
+{
+    fn clone(&self) -> Self
+    {
         SignalHandler {
             term: self.term.clone(),
         }
     }
 }
 
-impl SignalHandler {
-    pub fn is_run(&self) -> bool {
+impl SignalHandler
+{
+    pub fn is_run(&self) -> bool
+    {
         !self.term.load(Ordering::Relaxed)
+    }
+    pub fn stop(&mut self)
+    {
+        self.term.store(true, Ordering::Relaxed)
     }
 }
