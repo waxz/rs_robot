@@ -1,0 +1,33 @@
+[package]
+name = "nx_robot"
+version = "0.1.0"
+edition = "2021"
+#build = "build.rs"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+itertools = "0.11.0"
+#toml = "0.8.6"
+#signal-hook = "0.3.17"
+#num-traits = "0.2"
+serde = { version ="1.0.190", features = ["derive"] }
+tracing = "0.1"
+#tracing-subscriber = { version = "0.3", features = ["local-time"] }
+#tracing-appender = "0.2.0"
+rand = "0.8.5"
+
+
+
+
+nx_common = {path = "../nx_common"}
+
+[build-dependencies]
+bindgen = "0.65.1"
+
+
+#[profile.release]
+#opt-level = "z" # oprimize for size
+#lto = true      #enable link time optimization
+#codegen-units = 1  #reduce number of codegen units to increase optimization
+#panic = "abort"    # abort on panic
+#strip = true       #automatic strip symbols from the binary

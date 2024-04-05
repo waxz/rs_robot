@@ -1,7 +1,8 @@
-use crate::angle_norm;
 use crate::common::transform2d;
+use crate::{angle_norm, vector_2d_dist2};
 use itertools::izip;
 use std::f64::consts::{FRAC_PI_2, PI};
+use tracing::warn;
 
 pub fn build_bezier<const N: usize>(
     pa: &[f64; 2],
@@ -75,8 +76,9 @@ pub fn build_bezier_line<const N: usize>(
     path: &mut Vec<[f64; N]>,
 )
 {
-    log!(
-        "pa : {:?},pb : {:?},pc : {:?},pd : {:?}, pe : {:?}",
+    warn!(
+        "step: {}, pa : {:?},pb : {:?},pc : {:?},pd : {:?}, pe : {:?}",
+        step,
         pa,
         pb,
         pc,
@@ -84,24 +86,66 @@ pub fn build_bezier_line<const N: usize>(
         pe
     );
 
-    let mut simple_len: f64 =
-        ((pa[0] - pb[0]) * (pa[0] - pb[0]) + (pa[1] - pb[1]) * (pa[1] - pb[1])).sqrt()
-            + ((pc[0] - pb[0]) * (pc[0] - pb[0]) + (pc[1] - pb[1]) * (pc[1] - pb[1])).sqrt()
-            + ((pc[0] - pd[0]) * (pc[0] - pd[0]) + (pc[1] - pd[1]) * (pc[1] - pd[1])).sqrt();
+    let mut simple_len: f64 = (vector_2d_dist2!(pa, pb)).sqrt()
+        + (vector_2d_dist2!(pb, pc)).sqrt()
+        + (vector_2d_dist2!(pc, pd)).sqrt();
     let t_num = (simple_len / step) as usize;
     let curve_step = 1.0f64 / (t_num as f64);
 
-    let line_len = ((pe[0] - pd[0]) * (pe[0] - pd[0]) + (pe[1] - pd[1]) * (pe[1] - pd[1])).sqrt();
-    let line_num = (line_len / step) as usize;
-    let line_step_x = (pe[0] - pd[0]) / (line_num as f64);
-    let line_step_y = (pe[1] - pd[1]) / (line_num as f64);
-    let mut line_update_x: f64 = line_step_x;
-    let mut line_update_y: f64 = line_step_y;
+    let line_de_len = (vector_2d_dist2!(pd, pe)).sqrt();
+    let line_ab_len = (vector_2d_dist2!(pa, pb)).sqrt();
+
+    let long_ab = 1.0;
+    let long_ab_as_line = 0.5 * line_ab_len;
+
+    let mut line_ab_num = if line_ab_len > long_ab {
+        (long_ab_as_line / step) as usize
+    } else {
+        0
+    };
+
+    let line_de_num = (line_de_len / step) as usize;
+    let line_de_step = line_de_len/(line_de_num as f64);
+
+    let line_de_step_x = (pe[0] - pd[0])*line_de_step/line_de_len ;/// (line_de_num as f64);
+    let line_de_step_y = (pe[1] - pd[1])*line_de_step/line_de_len;// / (line_de_num as f64);
+    let mut line_de_update_x: f64 = line_de_step_x;
+    let mut line_de_update_y: f64 = line_de_step_y;
 
     // println!("line_len: {}, step : {}, curve_step : {}, line_step_x : {}, line_step_y:{}",line_len, step,curve_step,line_step_x,line_step_y);
 
-    println!("t_num: {}, line_num: {}", t_num, line_num);
-    path.resize(t_num + line_num + 0, [0.0; N]);
+    let total_num = t_num + line_de_num + line_ab_num;
+    warn!(
+        "t_num: {}, line_de_num: {}, line_ab_num: {}",
+        t_num, line_de_num, line_ab_num
+    );
+    path.resize(total_num, [0.0; N]);
+
+    if total_num < 2 {
+        return;
+    }
+
+    let mut pa = *pa;
+    if line_ab_num > 0 {
+        let ratio = long_ab_as_line / line_ab_len;
+        let line_ab_step_x = ratio * (pb[0] - pa[0]) / (line_ab_num as f64);
+        let line_ab_step_y = ratio * (pb[1] - pa[1]) / (line_ab_num as f64);
+        let mut line_ab_update_x: f64 = line_ab_step_x;
+        let mut line_ab_update_y: f64 = line_ab_step_y;
+
+        for i in 0..line_ab_num {
+            // line_update_x = line_step_x * (i - t_num) as f64;
+            // line_update_y = line_step_y *  (i - t_num) as f64;
+
+            path[i][0] = pa[0] + line_ab_update_x;
+            path[i][1] = pa[1] + line_ab_update_y;
+
+            line_ab_update_x += line_ab_step_x;
+            line_ab_update_y += line_ab_step_y;
+        }
+        pa[0] += line_ab_update_x;
+        pa[1] += line_ab_update_y;
+    }
 
     // bezier
     let mut t: f64 = 0.0;
@@ -112,7 +156,7 @@ pub fn build_bezier_line<const N: usize>(
     let mut pabc: [f64; 2] = [0.0; 2];
     let mut pbcd: [f64; 2] = [0.0; 2];
 
-    for i in 0..t_num {
+    for i in line_ab_num..t_num + line_ab_num {
         let one_minus_t = 1.0 - t;
 
         pab[0] = one_minus_t * pa[0] + t * pb[0];
@@ -137,15 +181,15 @@ pub fn build_bezier_line<const N: usize>(
     // path[t_num][0] = pd[0];//0.5*(pd[0] + path[t_num-1][0] );
     // path[t_num][1] = pd[1];//0.5*(pd[1] + path[t_num-1][1] );
     //
-    for i in t_num..t_num + line_num - 1 {
+    for i in t_num + line_ab_num..t_num + line_de_num + line_ab_num - 1 {
         // line_update_x = line_step_x * (i - t_num) as f64;
         // line_update_y = line_step_y *  (i - t_num) as f64;
 
-        path[i][0] = pd[0] + line_update_x;
-        path[i][1] = pd[1] + line_update_y;
+        path[i][0] = pd[0] + line_de_update_x;
+        path[i][1] = pd[1] + line_de_update_y;
 
-        line_update_x += line_step_x;
-        line_update_y += line_step_y;
+        line_de_update_x += line_de_step_x;
+        line_de_update_y += line_de_step_y;
     }
     // path[t_num + line_num][0] = pe[0];
     // path[t_num + line_num][1] = pe[1];
@@ -225,7 +269,7 @@ pub fn build_bezier_line_from_pose(
         *e = *target;
     }
 
-    return true;
+    return path.len() > 1;
 }
 pub fn build_bezier_line_from_pose_with_start(
     start: &[f64; 3],
@@ -238,6 +282,11 @@ pub fn build_bezier_line_from_pose_with_start(
     let a = [start[0], start[1]];
 
     let e = [target[0], target[1]];
+
+    let dist = vector_2d_dist2!(start, target);
+    if start.iter().any(|x| !x.is_finite()) || target.iter().any(|x| !x.is_finite()) || dist < 0.1 {
+        return false;
+    }
 
     // let start_pose = transform2d::Transform2d::new(start[0], start[1], start[2]);
     let target_pose = transform2d::Transform2d::new(target);
@@ -272,8 +321,7 @@ pub fn build_bezier_line_from_pose_with_start(
     if let Some(e) = path.last_mut() {
         *e = *target;
     }
-
-    return true;
+    return path.len() > 1;
 }
 
 // path nodes flow direction, not relative to robot pose
@@ -303,17 +351,20 @@ pub fn compute_path_flow(path: &mut Vec<[f64; 3]>) -> bool
 pub fn compute_path_direction(path: &mut Vec<[f64; 3]>, target: &[f64; 3])
 {
     let mut is_backward = false;
-    let target_yaw_diff = angle_norm!(target[2] - path.last().unwrap()[2]);
-    is_backward = target_yaw_diff.abs() > FRAC_PI_2;
-    if is_backward {
-        for p in &mut *path {
-            p[2] = angle_norm!(p[2] + PI);
+    if path.len() > 1 {
+        let target_yaw_diff = angle_norm!(target[2] - path.last().unwrap()[2]);
+        is_backward = target_yaw_diff.abs() > FRAC_PI_2;
+        if is_backward {
+            for p in &mut *path {
+                p[2] = angle_norm!(p[2] + PI);
+            }
         }
-    }
-    if let Some(e) = path.last_mut() {
-        e[0] = target[0];
-        e[1] = target[1];
-        e[2] = angle_norm!(target[2]);
+        if let Some(e) = path.last_mut() {
+            e[0] = target[0];
+            e[1] = target[1];
+            e[2] = angle_norm!(target[2]);
+        }
+    } else {
     }
 }
 

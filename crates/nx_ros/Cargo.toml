@@ -1,35 +1,29 @@
 [package]
-name = "nx_common"
+name = "nx_ros"
 version = "0.1.0"
 edition = "2021"
-#build = "build.rs"
+build = "build.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libc = "0.2.153"
-
-#rerun = { version = "0.10.0",features = ["web_viewer"] }
-#re_viewer = {version = "0.10.0"}
-
-
 #bytes = "1.3"
 #anyhow = "1.0"
 #clap = { version = "4.0", features = ["derive"] }
 #gltf = "1.1"
 #mimalloc = "0.1"
 itertools = "0.11.0"
-rand = "0.8.5"
+#rand = "0.8.5"
 #ndarray = "0.15.6"
-socket2 = "0.5.5"
+#socket2 = "0.5.5"
 #toml = "0.8.6"
-signal-hook = "0.3.17"
-time = "0.3.30"
+#ctrlc = "3.4.1"
+#signal-hook = "0.3.17"
+#time = "0.3.30"
 #tokio = "1.33.0"
-spin_sleep = "1.1.1"
-#colored = "2.0.4"
-num-traits = "0.2"
-#serde = { version ="1.0.190", features = ["derive"] }
-tracing = "0.1.40"
+log = "0.4.20"
+
+nx_common = {path = "../nx_common"}
+
 
 
 [build-dependencies]
@@ -38,11 +32,25 @@ cc = "1.0"
 cmake = "0.1"
 
 
-#warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
 #[profile.release]
 #opt-level = "z" # oprimize for size
 #lto = true      #enable link time optimization
 #codegen-units = 1  #reduce number of codegen units to increase optimization
 #panic = "abort"    # abort on panic
 #strip = true       #automatic strip symbols from the binary
+
+#[build]
+#target = "x86_64-unknown-linux-gnu"
 #
+#[target.x86_64-unknown-linux-gnu]
+##[build]
+#rustflags = [
+#    "-L" ,"/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib",
+#    "-l", "ros_helper",
+#    "-l", "tinyalloc",
+#    "-l", "ros_helper_message",
+#    "-l", "ros_helper_impl",
+#    "-C", "link-arg=-Wl,-rpath,$ORIGIN/../lib",
+#    "-C", "link-arg=-fuse-ld=gold",
+#    "-C", "link-arg=-Wl,-rpath,/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib"
+#]

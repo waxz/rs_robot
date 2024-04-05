@@ -251,6 +251,8 @@ fn main()
         for i in 0..100 {
             let t2 = OffsetDateTime::now_utc().to_offset(tz_offset);
             info!("t2 {:?}", t2);
+
+            // std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::Release);
         }
         counter += 1;
 

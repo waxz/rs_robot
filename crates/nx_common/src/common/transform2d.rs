@@ -62,6 +62,10 @@ pub fn yaw_to_quaternion(yaw: f64) -> [f64; 4]
     [qw, qx, qy, qz]
 }
 
+pub fn quaternion_is_normalised(mut qw: f64, mut qx: f64, mut qy: f64, mut qz: f64) -> bool
+{
+    ((qw * qw + qx * qx + qy * qy + qz * qz) - 1.0).abs() < 1e-3
+}
 //https://stackoverflow.com/questions/11667783/quaternion-and-normalization
 
 ///

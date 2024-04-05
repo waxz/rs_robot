@@ -1,10 +1,9 @@
+#![allow(unused)]
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
-// use copy_to_output::copy_to_output;
-
 macro_rules! ok(($expression:expr) => ($expression.unwrap()));
 macro_rules! log {
     ($fmt:expr) => (println!(concat!("build.rs:{}: ", $fmt), line!()));
@@ -12,7 +11,7 @@ macro_rules! log {
     line!(), $($arg)*));
 }
 
-#[allow(dead_code)]
+#[allow(unused)]
 fn gcc_simple(source: &str, libname: &str)
 {
     let out_dir = env::var("OUT_DIR").unwrap();
@@ -47,7 +46,7 @@ where
         panic!("failed to execute {:?}", configured);
     }
 }
-#[allow(dead_code)]
+
 fn cmake_simple(source: &str, shared: bool, libname_list: &[&str])
 {
     let outdir = env::var("OUT_DIR").expect("OUT_DIR is not set");
@@ -95,50 +94,84 @@ fn cmake_simple(source: &str, shared: bool, libname_list: &[&str])
     }
 }
 
-// #[allow(dead_code)]
-// fn build_use_cc()
-// {
-//     cc::Build::new()
-//         .file("cpp/cpp_liba.cpp")
-//         .cpp(true)
-//         .include("cpp/include")
-//         .compile("cpp_liba");
-// }
+fn build_use_cc()
+{
+    cc::Build::new()
+        .file("cpp/cpp_liba.cpp")
+        .cpp(true)
+        .include("cpp/include")
+        .compile("cpp_liba");
+}
+fn build_use_raw_cmake() {}
 
-// #[allow(dead_code)]
-// fn buld_use_rust_cmake_config()
-// {
-//     use cmake::Config;
-//
-//     let dst = Config::new("cpp")
-//         // .define("FOO", "BAR")
-//         // .cflag("-foo")
-//         .build();
-//     println!("cargo:rustc-link-search=native={}", dst.display());
-// }
+fn buld_use_rust_cmake_config()
+{
+    use cmake::Config;
+
+    let dst = Config::new("cpp")
+        // .define("FOO", "BAR")
+        // .cflag("-foo")
+        .build();
+    println!("cargo:rustc-link-search=native={}", dst.display());
+}
 fn main()
 {
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=wrapper.h");
-    // Re-runs script if any files in res are changed
-    // println!("cargo:rerun-if-changed=config/*");
-    // let build_type = env::var("PROFILE").unwrap();
-    // println!("build_type: {:?}",build_type);
-    // copy_to_output("config", "release").expect("Could not copy");
-    // let target_dir = env::var("CARGO_BUILD_TARGET_DIR").unwrap();
-    // let target_dir = env::var("CARGO_TARGET_DIR").unwrap();
-    // let target_dir = env::var("OUT_DIR").unwrap();
-    // println!("target_dir: {:?}",target_dir);
-    // let target_dir = env::var("CARGO_WORKSPACE_DIR").unwrap();
-    // println!("target_dir: {:?}",target_dir);
-
+    // println!("cargo:rerun-if-changed=build.rs");
 
     std::env::set_var("REBUILD", format!("{:?}", std::time::Instant::now()));
     println!("cargo:rerun-if-env-changed=REBUILD");
+    // println!("cargo:rustc-link-lib=static=stdc++");
+
     // println!("cargo:rustc-link-lib=dylib=stdc++");
 
-    // cmake_simple("src/cpp", true, &["math_op_shared"]);
-    cmake_simple("src/cpp", false, &["math_op_static"]);
+    // println!("cargo:rustc-flags=-l static=stdc++");
+    // println!("cargo:rustc-link-lib=static-nobundle=stdc++");
+    // let out_dir = env::var("OUT_DIR").unwrap();
+
+    // gcc_simple("cpp/basic_type.c","basic_type");
+    // cc::Build::new().file("cpp/basic_type.c").include("cpp/include").compile("basic_type");
+    // cc::Build::new().file("cpp/cpp_liba.cpp").cpp(true).include("cpp/include").compile("cpp_liba");
+
+    // println!("cargo:rustc-link-search=native=cpp/install/lib");
+    // println!("cargo:rustc-link-lib=static=ros_helper");
+    // println!("cargo:rustc-link-lib=static=libros");
+    // println!("cargo:rustc-link-lib=static=boost_thread");
+
+    // cmake_simple("cpp", true, &["basic_type_shared"]);
+    // cmake_simple("cpp", false, &["basic_type" ,"tinyalloc","libros","ros_helper_impl","ros_helper"]);
+    // cmake_simple("cpp", false, &["basic_type" ,"cpp_liba","tinyalloc","libros","ros_helper_impl","ros_helper"]);
+    // cmake_simple("cpp", false, &["cpp_liba"]);
+
+    // build_use_rust_cmake();
+    // build_use_cc();
+    // buld_use_rust_cmake_config();
+    // println!("cargo:rustc-link-lib=static=cpp_liba");
+
+    let output = if cfg!(target_os = "windows") {
+        Command::new("cmd")
+            .args(["/C", "echo hello"])
+            .output()
+            .expect("failed to execute process")
+    } else {
+        Command::new("sh")
+            .arg("-c")
+            .arg("echo hello")
+            .output()
+            .expect("failed to execute process")
+    };
+    let hello = output.stdout;
+    println!("check-stdout: {:?}", hello);
+    println!("check-stdout: {:?}", hello);
+
+    // Tell cargo to look for shared libraries in the specified directory
+    // println!("cargo:rustc-link-search=/path/to/lib");
+
+    // Tell cargo to tell rustc to link the system bzip2
+    // shared library.
+    // println!("cargo:rustc-link-lib=bz2");
+
+    // Tell cargo to invalidate the built crate whenever the wrapper changes
+    println!("cargo:rerun-if-changed=wrapper.h");
 
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
@@ -148,7 +181,8 @@ fn main()
         // bindings for.
         .header("wrapper.h")
         .clang_args(&[
-            "-Icpp/include",
+            "-Isrc/ros_api/src",
+            "-Isrc/ros_api/include",
             "-I/usr/include/qt6",
             "-I/usr/include/qt6/QtCore",
             "-I/usr/include/qt6/QtGui",
