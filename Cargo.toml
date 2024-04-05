@@ -11,13 +11,13 @@ edition = "2021"
 
 
 bytes = "1.3"
-anyhow = "1.0"
+#anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
-gltf = "1.1"
+#gltf = "1.1"
 mimalloc = "0.1"
 itertools = "0.11.0"
 rand = "0.8.5"
-ndarray = "0.15.6"
+#ndarray = "0.15.6"
 socket2 = "0.5.5"
 toml = "0.8.6"
 signal-hook = "0.3.17"
@@ -27,17 +27,39 @@ tokio = "1.33.0"
 
 [build-dependencies]
 bindgen = "0.65.1"
-cc = "1.0"
-cmake = "0.1"
+#cc = "1.0"
+#cmake = "0.1"
+
+
+#https://xxchan.me/cs/2023/02/17/optimize-rust-comptime-en.html
+
+[profile.dev]
+opt-level = 0
+debug = true
+#split-debuginfo = '...'  # Platform-specific.
+strip = "none"
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = 'unwind'
+incremental = true
+codegen-units = 1
+rpath = false
+
 
 
 [profile.release]
-opt-level = "z" # oprimize for size
-lto = true      #enable link time optimization
+#opt-level = "z" # oprimize for size
+lto = true     #enable link time optimization
 codegen-units = 1  #reduce number of codegen units to increase optimization
 panic = "abort"    # abort on panic
 strip = true       #automatic strip symbols from the binary
+opt-level = 2
+incremental = false
+debug = "line-tables-only"
+
+
 
 
 [workspace]
-members = [ "crates/nx_common", "crates/nx_practice",]
+members = [ "crates/nx_common", "crates/nx_practice", "crates/nx_ros", "crates/nx_robot" ]

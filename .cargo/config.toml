@@ -1,3 +1,32 @@
+[net]
+git-fetch-with-cli = true
+
+[build]
+#rustflags = [
+##    "-Z", "threads=12",
+#    "-C", "target-cpu=native",
+##    "-Z", "timings",
+##    "-Z", "self-profile",
+#
+#]
+rustc-wrapper = "/home/waxz/.cargo/bin/sccache"
+target-dir = "/tmp/cargo-target/rust_practice"
+
+
+#[profile.dev.build-override]
+#opt-level = 0
+#codegen-units = 256
+#debug = false # when possible
+#
+#[profile.release.build-override]
+#opt-level = 0
+#codegen-units = 256
+
+
+#/home/waxz/dev/mold-2.4.0-x86_64-linux/bin/mold
+#"-C", "link-arg=-fuse-ld=lld",
+#"-C", "link-arg=-fuse-ld=/home/waxz/dev/mold-2.4.0-x86_64-linux/bin/mold",
+
 [target.x86_64-unknown-linux-gnu]
 rustflags = [
     "-L" ,"/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib",
@@ -5,6 +34,7 @@ rustflags = [
     "-l", "tinyalloc",
     "-l", "ros_helper_message",
     "-l", "ros_helper_impl",
+    "-l", "tcc_builder",
     "-C", "link-arg=-Wl,-rpath,$ORIGIN/../lib",
     "-C", "link-arg=-fuse-ld=gold",
     "-C", "link-arg=-Wl,-rpath,/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib"
