@@ -6,7 +6,27 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libc = "0.2.153"
+
+libc = { version = "0.2.153" }
+
+itertools = { version = "0.11.0" }
+rand = "0.8.5"
+#ndarray = "0.15.6"
+#socket2 = "0.5.5"
+#toml = "0.8.6"
+signal-hook = { version = "0.3.17" }
+time = { version = "0.3.30" ,features = ["local-offset"]}
+#tokio = "1.33.0"
+spin_sleep = { version = "1.1.1" }
+#colored = "2.0.4"
+num-traits = { version = "0.2" }
+#serde = { version ="1.0.190", features = ["derive"] }
+tracing = { version = "0.1.40" }
+
+clap = { version = "4.0", features = ["derive"] }
+serde = { version ="1.0.190", features = ["derive"] }
+socket2 = { version = "0.5.5" }
+
 
 #rerun = { version = "0.10.0",features = ["web_viewer"] }
 #re_viewer = {version = "0.10.0"}
@@ -17,25 +37,27 @@ libc = "0.2.153"
 #clap = { version = "4.0", features = ["derive"] }
 #gltf = "1.1"
 #mimalloc = "0.1"
-itertools = "0.11.0"
-rand = "0.8.5"
+#itertools = { version = "0.11.0" }
+#rand = "0.8.5"
 #ndarray = "0.15.6"
-socket2 = "0.5.5"
+#socket2 = { version = "0.5.5" }
 #toml = "0.8.6"
-signal-hook = "0.3.17"
-time = "0.3.30"
+#signal-hook = { version = "0.3.17" }
+#time = { version = "0.3.30" ,features = ["local-offset"], workspace = true}
 #tokio = "1.33.0"
-spin_sleep = "1.1.1"
+#spin_sleep = { version = "1.1.1" }
 #colored = "2.0.4"
-num-traits = "0.2"
+#num-traits = { version = "0.2" }
 #serde = { version ="1.0.190", features = ["derive"] }
-tracing = "0.1.40"
+#tracing = { version = "0.1.40" }
 
+#clap = { version = "4.0", features = ["derive"] }
+#serde = { version ="1.0.190", features = ["derive"] }
 
-[build-dependencies]
-bindgen = "0.65.1"
-cc = "1.0"
-cmake = "0.1"
+#[build-dependencies]
+#bindgen = "0.65.1"
+#cc = "1.0"
+#cmake = "0.1"
 
 
 #warning: profiles for the non root package will be ignored, specify profiles at the workspace root:

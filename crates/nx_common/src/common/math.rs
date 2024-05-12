@@ -1,6 +1,115 @@
 use num_traits::Float;
 use std::f64::consts::{PI, TAU};
-use std::ops::AddAssign;
+use std::ops::{AddAssign, Mul};
+
+
+//https://stackoverflow.com/questions/74193288/calculating-distance-from-a-point-to-a-line-given-the-line-direction
+
+#[derive(Debug, Clone, Copy)]
+pub struct Point3f{
+    pub x:f32,
+    pub y:f32,
+    pub z:f32
+}
+impl Point3f{
+
+    pub fn normalise(&mut self){
+        let length_div = 1.0/self.length();
+        self.x  *= length_div;
+        self.y  *= length_div;
+        self.z  *= length_div;
+    }
+
+    pub fn dot(&self, rhs: Point3f ) -> f32{
+        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
+    }
+    pub fn length(&self) ->f32{
+        (self.x*self.x + self.y*self.y + self.z*self.z).sqrt()
+    }
+
+    pub fn distance_to_line(line0 :Point3f, mut line_dir: Point3f, mut point:Point3f) ->f32{
+        // Translate point making it relative to the start of the line
+        point -= line0;
+        line_dir.normalise();
+
+        // Coefficient to get closest point on the line,
+        // equal to length(point) * cos(angle) / length(lineDir)
+        let pl:f32 = line_dir.dot( point );
+        // Position of the closest point on the line
+
+        let closest = line_dir * pl;
+
+        // Compute distance between two points
+        return ( point - closest ).length();
+    }
+}
+
+
+impl std::ops::SubAssign for Point3f {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.x -= rhs.x;
+        self.y -= rhs.y;
+        self.z -= rhs.z;
+
+    }
+}
+impl std::ops::DivAssign<f32> for Point3f{
+    fn div_assign(&mut self, rhs: f32) {
+
+        self.x /= rhs;
+        self.y /= rhs;
+        self.z /= rhs;
+    }
+}
+
+impl std::ops::Mul<f32> for Point3f{
+    type Output = Self;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        Self{
+            x: self.x * rhs,
+            y: self.y * rhs,
+            z: self.z * rhs,
+        }
+    }
+}
+
+impl std::ops::Sub for Point3f {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self{
+            x:self.x - rhs.x,
+            y:self.y - rhs.y,
+            z:self.z - rhs.z,
+        }
+    }
+}
+impl std::ops::Add for Point3f{
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+
+        Self{
+            x:self.x + rhs.x,
+            y:self.y + rhs.y,
+            z:self.z + rhs.z,
+        }
+    }
+
+}
+
+impl Mul<Point3f> for f32 {
+    type Output = Point3f;
+
+    fn mul(self, rhs: Point3f) -> Self::Output {
+        Self::Output{
+            x : self * rhs.x,
+            y : self * rhs.y,
+            z : self * rhs.z,
+        }
+    }
+}
 
 //https://stackoverflow.com/questions/45630057/rust-generic-addassign-with-references
 
@@ -182,8 +291,9 @@ pub fn linspace<T, const N: usize>(
 #[cfg(test)]
 mod test
 {
-    use crate::common::math::linspace;
+    use crate::common::math::{linspace, Point3f};
     use std::f64::consts::{PI, TAU};
+    use std::ops::Mul;
 
     #[test]
     fn test_linspace_bench()
@@ -255,5 +365,45 @@ mod test
 
         println!("v1 dot v2 = {}", dot_product_2d!(v1, v2));
         println!("v1 cross v2 = {}", cross_product_2d!(v1, v2));
+    }
+
+    #[test]
+    fn point_to_line_3d(){
+
+        let mut v1 = Point3f{
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let mut v2 = Point3f{
+            x: 3.0,
+            y: 4.0,
+            z: 5.0,
+        };
+        let mut v3 = v1 + v2;
+        let mut v4 = v1 - v2;
+        let mut v5 = 2.0_f32 * v4 * -1.0_f32;
+
+
+        v3 = Point3f{
+            x: 4.0,
+            y: 1.0,
+            z: 1.0,
+        };
+        v4 = Point3f{
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        };
+        v5 = Point3f{
+            x: 4.0,
+            y: 1.0,
+            z: 2.0,
+        };
+        let dist = Point3f::distance_to_line(v3,v4,v5);
+
+        println!("v3: {:?}, v4 : {:?}, v5: {:?}, dist: {}", v3, v4,v5,dist);
+
+
     }
 }

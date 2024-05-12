@@ -62,7 +62,7 @@ pub fn yaw_to_quaternion(yaw: f64) -> [f64; 4]
     [qw, qx, qy, qz]
 }
 
-pub fn quaternion_is_normalised(mut qw: f64, mut qx: f64, mut qy: f64, mut qz: f64) -> bool
+pub fn quaternion_is_normalised(qw: f64, qx: f64, qy: f64, qz: f64) -> bool
 {
     ((qw * qw + qx * qx + qy * qy + qz * qz) - 1.0).abs() < 1e-3
 }
@@ -126,12 +126,12 @@ pub fn quaternion_to_euler(mut qw: f64, mut qx: f64, mut qy: f64, mut qz: f64) -
 
 pub fn euler_to_maxtrix<T: Float>(yaw: T, pitch: T, roll: T) -> [[T; 3]; 3]
 {
-    let mut cy = yaw.cos();
-    let mut sy = yaw.sin();
-    let mut cp = pitch.cos();
-    let mut sp = pitch.sin();
-    let mut cr = roll.cos();
-    let mut sr = roll.sin();
+    let cy = yaw.cos();
+    let sy = yaw.sin();
+    let cp = pitch.cos();
+    let sp = pitch.sin();
+    let cr = roll.cos();
+    let sr = roll.sin();
 
     [
         [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],

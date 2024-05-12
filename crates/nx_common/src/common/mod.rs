@@ -84,21 +84,18 @@ pub mod types;
 
 pub mod atomic;
 
+pub mod memory;
 pub mod time;
 
 #[cfg(test)]
 mod test
 {
     use crate::common::bench::Bench;
-    use colored::*;
     use itertools::izip;
     #[test]
     fn test_bench()
     {
-        println!("{}", "hello".red().on_black());
-        println!("{}", "hello".blue().on_red());
 
-        println!("{}", "hello color terminal".yellow());
         log!("run bench test");
         log!("run bench test : {}", "hello");
 

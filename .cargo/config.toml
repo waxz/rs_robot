@@ -27,16 +27,15 @@ target-dir = "/tmp/cargo-target/rust_practice"
 #"-C", "link-arg=-fuse-ld=lld",
 #"-C", "link-arg=-fuse-ld=/home/waxz/dev/mold-2.4.0-x86_64-linux/bin/mold",
 
-[target.x86_64-unknown-linux-gnu]
-rustflags = [
-    "-L" ,"/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib",
-    "-l", "ros_helper",
-    "-l", "tinyalloc",
-    "-l", "ros_helper_message",
-    "-l", "ros_helper_impl",
-    "-l", "tcc_builder",
-    "-C", "link-arg=-Wl,-rpath,$ORIGIN/../lib",
-    "-C", "link-arg=-fuse-ld=gold",
-    "-C", "link-arg=-Wl,-rpath,/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib"
-]
+#[target.x86_64-unknown-linux-gnu]
+#rustflags = [
+#    "-L" ,"/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib",
+#    "-l", "ros_helper",
+#    "-l", "dds_helper_shared",
+#    "-l", "tinyalloc",
+#    "-l", "tcc_builder",
+#    "-C", "link-arg=-Wl,-rpath,$ORIGIN/../lib",
+#    "-C", "link-arg=-fuse-ld=gold",
+#    "-C", "link-arg=-Wl,-rpath,/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib"
+#]
 

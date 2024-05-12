@@ -26,6 +26,11 @@ impl Thread
             handler: Some(std::thread::spawn(f)),
         }
     }
+
+    pub fn is_none(&self) -> bool
+    {
+        self.handler.is_none()
+    }
 }
 
 impl Default for Thread

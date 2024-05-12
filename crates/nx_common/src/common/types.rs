@@ -29,7 +29,7 @@ impl<T: Clone> Clone for UnsafeMutexSender<T>
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy)]
 pub struct UnsafeSender<T: Clone>(T);
 
 unsafe impl<T: Clone> Send for UnsafeSender<T> {}

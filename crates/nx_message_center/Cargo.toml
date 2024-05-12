@@ -1,5 +1,7 @@
+#cargo-features = [ "profile-rustflags" ]
+
 [package]
-name = "nx_ros"
+name = "nx_message_center"
 version = "0.1.0"
 edition = "2021"
 build = "build.rs"
@@ -28,9 +30,20 @@ nx_common = {path = "../nx_common"}
 
 [build-dependencies]
 bindgen = "0.65.1"
-cc = "1.0"
-cmake = "0.1"
+#cc = "1.0"
+#cmake = "0.1"
 
+#[target.x86_64-unknown-linux-gnu]
+#rustflags = [
+#    "-L" ,"/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib",
+#    "-l", "ros_helper",
+#    "-l", "dds_helper_shared",
+#    "-l", "tinyalloc",
+#    "-l", "tcc_builder",
+#    "-C", "link-arg=-Wl,-rpath,$ORIGIN/../lib",
+#    "-C", "link-arg=-fuse-ld=gold",
+#    "-C", "link-arg=-Wl,-rpath,/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib"
+#]
 
 #[profile.release]
 #opt-level = "z" # oprimize for size

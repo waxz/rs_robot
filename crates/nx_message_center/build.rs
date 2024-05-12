@@ -94,32 +94,34 @@ fn cmake_simple(source: &str, shared: bool, libname_list: &[&str])
     }
 }
 
-fn build_use_cc()
-{
-    cc::Build::new()
-        .file("cpp/cpp_liba.cpp")
-        .cpp(true)
-        .include("cpp/include")
-        .compile("cpp_liba");
-}
+// fn build_use_cc()
+// {
+//     cc::Build::new()
+//         .file("cpp/cpp_liba.cpp")
+//         .cpp(true)
+//         .include("cpp/include")
+//         .compile("cpp_liba");
+// }
 fn build_use_raw_cmake() {}
 
-fn buld_use_rust_cmake_config()
-{
-    use cmake::Config;
-
-    let dst = Config::new("cpp")
-        // .define("FOO", "BAR")
-        // .cflag("-foo")
-        .build();
-    println!("cargo:rustc-link-search=native={}", dst.display());
-}
+// fn buld_use_rust_cmake_config()
+// {
+//     use cmake::Config;
+//
+//     let dst = Config::new("cpp")
+//         // .define("FOO", "BAR")
+//         // .cflag("-foo")
+//         .build();
+//     println!("cargo:rustc-link-search=native={}", dst.display());
+// }
 fn main()
 {
     // println!("cargo:rerun-if-changed=build.rs");
 
     std::env::set_var("REBUILD", format!("{:?}", std::time::Instant::now()));
     println!("cargo:rerun-if-env-changed=REBUILD");
+    let clang_args =
+        ["-I/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/include"];
     // println!("cargo:rustc-link-lib=static=stdc++");
 
     // println!("cargo:rustc-link-lib=dylib=stdc++");
@@ -146,6 +148,16 @@ fn main()
     // build_use_cc();
     // buld_use_rust_cmake_config();
     // println!("cargo:rustc-link-lib=static=cpp_liba");
+
+    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib -Clink-arg=-fuse-ld=gold");
+
+    println!("cargo:rustc-link-search=native=/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib");
+    println!("cargo:rustc-link-lib=ros_helper");
+    println!("cargo:rustc-link-lib=dds_helper_shared");
+    println!("cargo:rustc-link-lib=tinyalloc");
+    println!("cargo:rustc-link-lib=tcc_builder");
+    // println!("cargo:rustc-flags=-L/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib -lros_helper -ldds_helper_shared -ltinyalloc -ltcc_builder ");
 
     let output = if cfg!(target_os = "windows") {
         Command::new("cmd")
@@ -180,13 +192,7 @@ fn main()
         // The input header we would like to generate
         // bindings for.
         .header("wrapper.h")
-        .clang_args(&[
-            "-Isrc/ros_api/src",
-            "-Isrc/ros_api/include",
-            "-I/usr/include/qt6",
-            "-I/usr/include/qt6/QtCore",
-            "-I/usr/include/qt6/QtGui",
-        ])
+        .clang_args(&clang_args)
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))

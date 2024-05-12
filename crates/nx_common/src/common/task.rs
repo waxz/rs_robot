@@ -117,17 +117,17 @@ impl TaskManager
     {
         self.sleeper.borrow_mut().loop_start();
         self.sort();
-        let mut now = std::time::Instant::now();
+        let now = std::time::Instant::now();
 
         let mut need_remove = false;
         for (
             i,
             Task {
                 f: f,
-                prio: prio,
-                slot: slot,
-                stamp: stamp,
-                delay_us: delay_us,
+                prio,
+                slot,
+                stamp,
+                delay_us,
                 valid,
                 run_time_us,
                 max_run_time_us,

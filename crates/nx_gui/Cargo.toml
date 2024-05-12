@@ -1,0 +1,58 @@
+[package]
+name = "nx_gui"
+version = "0.1.0"
+edition = "2021"
+#build = "build.rs"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+itertools = { version = "0.11.0" }
+#toml = "0.8.6"
+#signal-hook = "0.3.17"
+#num-traits = "0.2"
+#serde = { version ="1.0.190", features = ["derive"] }
+#tracing = "0.1"
+#tracing-subscriber = { version = "0.3", features = ["local-time"] }
+#tracing-appender = "0.2.0"
+#rand = "0.8.5"
+clap = { version = "4.0", features = ["derive"] }
+#time = { version = "0.3.30" ,features = ["local-offset"]}
+time = { version = "0.3.30" , features = ["local-offset", "macros"] }
+rand = "0.8.5"
+
+
+# rerun
+#rerun = {version = "0.15.1", features = ["web_viewer", "clap"] }
+#re_crash_handler = {version = "0.15.1" }
+#re_viewer = { version = "0.15.1", default-features = false }
+## We need re_sdk_comms to receive log events from and SDK:
+#re_sdk_comms = { version = "0.15.1", features = ["server"] }
+#
+## mimalloc is a much faster allocator:
+#mimalloc = "0.1"
+#
+## We need tokio for re_sdk_comms:
+#tokio = { version = "1.24", features = ["macros", "rt-multi-thread"] }
+
+#bevy
+bevy = { version = "0.13",features = ["dynamic_linking"] }
+bevy_egui = "0.27"
+bevy_panorbit_camera = "0.18.0"
+
+#smooth-bevy-cameras = "0.11.0"
+
+
+bevy_mod_raycast = "0.17.0"
+
+bevy_mod_picking = "0.18.2"
+#argh = "0.1.12"
+
+
+#bevy_shader_utils = "0.7.0"
+
+
+
+# nx lib
+nx_common = {path = "../nx_common"}
+nx_message_center= {path = "../nx_message_center"}
+bytemuck = "1.15.0"

@@ -1,18 +1,19 @@
-use crate::ros::tiny_alloc::TinyAlloc;
-use crate::ros_api::{
-    HeaderStringT, HeaderStringT_alloc, HeaderStringT_ptr, HeaderStringT_set_buffer, PathT,
-    PathT_alloc, PathT_ptr, PathT_set_buffer, PoseStampedT, PoseStampedT_alloc, PoseStampedT_ptr,
-    ROS_MSG_STRUCT_MAX_FRAME_ID_LEN,
+use crate::base::tiny_alloc::TinyAlloc;
+use crate::binding::{
+    HeaderString, HeaderString_alloc, HeaderString_ptr, HeaderString_set_buffer, Path, Path_alloc,
+    Path_ptr, Path_set_buffer, PoseStamped, PoseStamped_alloc, PoseStamped_ptr,
+    MSG_STRUCT_MAX_FRAME_ID_LEN,
 };
 use itertools::izip;
 use nx_common::common::types::{UnsafeMutexSender, UnsafeSender};
 use os::raw::c_char;
-use std::ffi::{c_uchar, c_void, CString};
+use std::ffi::{c_uchar, c_void, CStr, CString};
 use std::{os, slice};
 
+#[cfg(aaaa)]
 mod common_remove
 {
-    use crate::ros_api::ROS_MSG_STRUCT_MAX_FRAME_ID_LEN;
+    use crate::binding::ROS_MSG_STRUCT_MAX_FRAME_ID_LEN;
     use std::mem::ManuallyDrop;
     use std::os::raw::c_char;
 
@@ -60,20 +61,31 @@ mod common_remove
 
 pub mod shared
 {
-
-    use crate::ros::tiny_alloc::TinyAlloc;
-    use crate::ros_api::{
-        HeaderStringT, HeaderStringT_alloc, HeaderStringT_ptr, HeaderStringT_set_buffer, OdometryT,
-        OdometryT_alloc, OdometryT_ptr, PathT, PathT_alloc, PathT_ptr, PathT_set_buffer,
-        PoseStampedT, PoseStampedT_alloc, PoseStampedT_ptr, TwistT, TwistT_alloc, TwistT_ptr,
+    use crate::base::tiny_alloc::TinyAlloc;
+    use crate::binding::{
+        ta_cfg_t, HeaderString_alloc, HeaderString_ptr, HeaderString_realloc,
+        HeaderString_set_buffer, Odometry_alloc, Odometry_ptr, Path_alloc, Path_ptr, Path_realloc,
+        Path_set_buffer, PointCloud2_alloc, PointCloud2_ptr, PointCloud2_realloc,
+        PointCloud2_set_buffer, PoseStamped_alloc, PoseStamped_ptr, Twist_alloc, Twist_ptr,
     };
     use itertools::{izip, Itertools};
     use nx_common::common::types::UnsafeSender;
+    use std::ffi::CStr;
     use std::mem::ManuallyDrop;
     use std::ops::Deref;
     use std::os::raw::{c_char, c_void};
     use std::slice;
+    use std::sync::OnceLock;
     use std::sync::{Arc, Mutex, MutexGuard};
+
+    pub struct DefaultAllocatorLock;
+    impl DefaultAllocatorLock
+    {
+        thread_local! {
+            // Could add pub to make it public to whatever Foo already is public to.
+             pub static ALLOCATOR: OnceLock<TinyAlloc> = OnceLock::new();
+        }
+    }
 
     //get frame_id and data, convert between [uchar] and string
     // set-()
@@ -87,29 +99,34 @@ pub mod shared
     {
         // pub inner: &'a mut HeaderStringT,
         // pub ptr: HeaderStringT_ptr,
-        ptr: UnsafeSender<HeaderStringT_ptr>,
+        ptr: UnsafeSender<HeaderString_ptr>,
+        cfg: Option<ta_cfg_t>,
     }
 
     impl<'a> HeaderString
     {
-        pub fn new(size: u32) -> Self
+        pub fn new(size: u32, cfg: ta_cfg_t) -> Self
         {
-            let ptr = unsafe { HeaderStringT_alloc(size) };
+            // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+
+            let ptr = unsafe { HeaderString_alloc(size, &cfg) };
             // let mut inner = unsafe { ptr.as_mut().unwrap() };
             Self {
                 //inner,
                 ptr: UnsafeSender::new(ptr),
+                cfg: Some(cfg),
             }
         }
 
         pub fn from_ptr(ptr: *mut c_void) -> Self
         {
-            let ptr = ptr as HeaderStringT_ptr;
+            let ptr = ptr as HeaderString_ptr;
             let mut inner = unsafe { ptr.as_mut().unwrap() };
 
             Self {
                 //inner,
                 ptr: UnsafeSender::new(ptr),
+                cfg: None,
             }
         }
 
@@ -126,14 +143,18 @@ pub mod shared
                     //     t->element_size = size;
                     //     t->buffer_size = (size + 1) * sizeof (char);
                     // }
-                    HeaderStringT_set_buffer(inner, data_slice_len);
+                    HeaderString_set_buffer(inner, data_slice_len);
                 }
                 if data_slice_len > inner.element_size {
                     let ptr = unsafe {
-                        TinyAlloc::realloc::<HeaderStringT>(
-                            inner as *mut _ as *mut c_void,
-                            (inner.base_size + inner.buffer_size) as usize,
-                        )
+                        // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+
+                        HeaderString_realloc(data_slice_len, inner, &self.cfg.unwrap())
+
+                        // TinyAlloc::realloc::<HeaderStringT>(
+                        //     inner as *mut _ as *mut c_void,
+                        //     (inner.base_size + inner.buffer_size) as usize,
+                        // )
                     };
                     self.ptr = UnsafeSender::new(ptr);
                     inner = unsafe { self.ptr.get().as_mut().unwrap() };
@@ -211,7 +232,7 @@ pub mod shared
             )
         }
 
-        pub fn get_ptr(&self) -> &HeaderStringT_ptr
+        pub fn get_ptr(&self) -> &HeaderString_ptr
         {
             self.ptr.get()
         }
@@ -222,6 +243,7 @@ pub mod shared
         {
             Self {
                 ptr: self.ptr.clone(),
+                cfg: self.cfg,
             }
         }
     }
@@ -229,26 +251,31 @@ pub mod shared
     #[derive(Debug)]
     pub struct PoseStamped
     {
-        ptr: UnsafeSender<PoseStampedT_ptr>,
+        ptr: UnsafeSender<PoseStamped_ptr>,
+        cfg: Option<ta_cfg_t>,
     }
 
     impl PoseStamped
     {
-        pub fn new() -> Self
+        pub fn new(cfg: ta_cfg_t) -> Self
         {
-            let ptr = unsafe { PoseStampedT_alloc(0) };
+            // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+
+            let ptr = unsafe { PoseStamped_alloc(&cfg) };
             let mut inner = unsafe { ptr.as_mut().unwrap() };
             Self {
                 ptr: UnsafeSender::new(ptr),
+                cfg: Some(cfg),
             }
         }
         pub fn from_ptr(ptr: *mut c_void) -> Self
         {
-            let ptr = ptr as PoseStampedT_ptr;
+            let ptr = ptr as PoseStamped_ptr;
             let mut inner = unsafe { ptr.as_mut().unwrap() };
 
             Self {
                 ptr: UnsafeSender::new(ptr),
+                cfg: None,
             }
         }
 
@@ -278,17 +305,17 @@ pub mod shared
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
             inner.stamp
         }
-        pub fn get_data(&self) -> &PoseStampedT
+        pub fn get_data(&self) -> &crate::binding::PoseStamped
         {
-            let inner = unsafe { self.ptr.get().as_mut().unwrap() };
+            let inner = unsafe { self.ptr.get().as_ref().unwrap() };
             inner
         }
-        pub fn get_mut_data(&mut self) -> &mut PoseStampedT
+        pub fn get_mut_data(&mut self) -> &mut crate::binding::PoseStamped
         {
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
             inner
         }
-        pub fn get_ptr(&self) -> &PoseStampedT_ptr
+        pub fn get_ptr(&self) -> &PoseStamped_ptr
         {
             self.ptr.get()
         }
@@ -299,9 +326,145 @@ pub mod shared
         {
             Self {
                 ptr: self.ptr.clone(),
+                cfg: self.cfg,
             }
         }
     }
+
+    #[derive(Debug)]
+    pub struct PointCloud2
+    {
+        ptr: UnsafeSender<PointCloud2_ptr>,
+        cfg: Option<ta_cfg_t>,
+    }
+    impl Clone for PointCloud2
+    {
+        fn clone(&self) -> Self
+        {
+            // Odometry::from_ptr(self.ptr.ptr as *mut c_void)
+            Self {
+                ptr: self.ptr.clone(),
+                cfg: self.cfg,
+            }
+        }
+    }
+    impl PointCloud2
+    {
+        pub fn new(height: u32, width: u32, channel: u32, cfg: ta_cfg_t) -> Self
+        {
+            // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+
+            let ptr = unsafe { PointCloud2_alloc(height, width, channel, &cfg) };
+            let mut inner = unsafe { ptr.as_mut().unwrap() };
+            Self {
+                ptr: UnsafeSender::new(ptr),
+                cfg: Some(cfg),
+            }
+        }
+
+        pub fn from_ptr(ptr: *mut c_void) -> Self
+        {
+            let ptr = ptr as PointCloud2_ptr;
+            let mut inner = unsafe { ptr.as_mut().unwrap() };
+
+            Self {
+                ptr: UnsafeSender::new(ptr),
+                cfg: None,
+            }
+        }
+        pub fn set_frame_id(&mut self, data: &str)
+        {
+            let data_slice = data.as_bytes();
+            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+
+            // izip!() accepts iterators and/or values with IntoIterator.
+            // for (x, y) in izip!(&mut inner.frame_id, data_slice) {
+            //     *x = *y as c_char;
+            // }
+            unsafe {
+                std::ptr::copy(
+                    data.as_ptr(),
+                    inner.frame_id.as_mut_ptr() as *mut _,
+                    data.len(),
+                );
+            }
+            // inner.frame_id[data_slice.len()] = 0;
+            // println!("self.inner.frame_id: {:?}",self.inner.frame_id);
+        }
+        pub fn get_frame_id(&self) -> ManuallyDrop<String>
+        {
+            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+
+            nx_common::common::string::string_from_cstr_ptr(
+                inner.frame_id.as_mut_ptr() as *mut u8,
+                inner.frame_id.len(),
+            )
+        }
+
+        pub fn get_stamp(&self) -> u64
+        {
+            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+            inner.stamp
+        }
+
+        pub fn set_stamp(&mut self, stamp: u64)
+        {
+            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+
+            inner.stamp = stamp;
+        }
+        pub fn alloc_data(&mut self, height: u32, width: u32, channel: u32)
+        {
+            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+
+            {
+                let ptr = unsafe {
+                    // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+
+                    PointCloud2_realloc(height, width, channel, inner, &self.cfg.unwrap())
+
+                    // TinyAlloc::realloc::<PathT>(
+                    //     inner as *mut _ as *mut c_void,
+                    //     (inner.base_size + inner.buffer_size) as usize,
+                    // )
+                };
+                self.ptr = UnsafeSender::new(ptr);
+            }
+        }
+
+        pub fn get_data(&self) -> &[f32]
+        {
+            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+
+            let float_num = inner.height * inner.width * inner.channel;
+            let inner_data =
+                unsafe { slice::from_raw_parts_mut(inner.buffer.as_mut_ptr(), float_num as usize) };
+            inner_data
+        }
+
+        fn get_dim(&self) -> [u32; 3]
+        {
+            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+
+            [inner.height, inner.width, inner.channel]
+        }
+
+        pub fn get_mut_data(&mut self) -> &mut [f32]
+        {
+            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+            let float_num = inner.height * inner.width * inner.channel;
+
+            let inner_data =
+                unsafe { slice::from_raw_parts_mut(inner.buffer.as_mut_ptr(), float_num as usize) };
+            inner_data
+        }
+
+        pub fn get_ptr(&self) -> &PointCloud2_ptr
+        {
+            self.ptr.get()
+        }
+    }
+
     #[derive(Debug)]
     pub struct Path
     {
@@ -309,26 +472,31 @@ pub mod shared
         // pub ptr: PathT_ptr,
         // pub frame_id: String,
         // pub data: Vec<PoseStamped<'a>>,
-        ptr: UnsafeSender<PathT_ptr>,
+        ptr: UnsafeSender<Path_ptr>,
+        cfg: Option<ta_cfg_t>,
     }
 
     impl Path
     {
-        pub fn new(size: u32) -> Self
+        pub fn new(size: u32, cfg: ta_cfg_t) -> Self
         {
-            let ptr = unsafe { PathT_alloc(size) };
+            // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+
+            let ptr = unsafe { Path_alloc(size, &cfg) };
             let mut inner = unsafe { ptr.as_mut().unwrap() };
             Self {
                 ptr: UnsafeSender::new(ptr),
+                cfg: Some(cfg),
             }
         }
         pub fn from_ptr(ptr: *mut c_void) -> Self
         {
-            let ptr = ptr as PathT_ptr;
+            let ptr = ptr as Path_ptr;
             let mut inner = unsafe { ptr.as_mut().unwrap() };
 
             Self {
                 ptr: UnsafeSender::new(ptr),
+                cfg: None,
             }
         }
 
@@ -371,21 +539,21 @@ pub mod shared
         {
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
 
-            unsafe {
-                PathT_set_buffer(inner, size);
-            }
-
-            if size > inner.element_size {
+            {
                 let ptr = unsafe {
-                    TinyAlloc::realloc::<PathT>(
-                        inner as *mut _ as *mut c_void,
-                        (inner.base_size + inner.buffer_size) as usize,
-                    )
+                    // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+
+                    Path_realloc(size, inner, &self.cfg.unwrap())
+
+                    // TinyAlloc::realloc::<PathT>(
+                    //     inner as *mut _ as *mut c_void,
+                    //     (inner.base_size + inner.buffer_size) as usize,
+                    // )
                 };
                 self.ptr = UnsafeSender::new(ptr);
             }
         }
-        pub fn get_data(&self) -> &[PoseStampedT]
+        pub fn get_data(&self) -> &[crate::binding::PoseStamped]
         {
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
 
@@ -395,7 +563,7 @@ pub mod shared
             inner_data
         }
 
-        pub fn get_mut_data(&mut self) -> &mut [PoseStampedT]
+        pub fn get_mut_data(&mut self) -> &mut [crate::binding::PoseStamped]
         {
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
 
@@ -405,7 +573,7 @@ pub mod shared
             inner_data
         }
 
-        pub fn get_ptr(&self) -> &PathT_ptr
+        pub fn get_ptr(&self) -> &Path_ptr
         {
             self.ptr.get()
         }
@@ -417,6 +585,7 @@ pub mod shared
         {
             Self {
                 ptr: self.ptr.clone(),
+                cfg: self.cfg,
             }
         }
     }
@@ -425,36 +594,40 @@ pub mod shared
     pub struct Odometry
     {
         // pub inner: &'a mut OdometryT,
-        pub ptr: UnsafeSender<OdometryT_ptr>,
-        // pub data: common::Odometry,
+        pub ptr: UnsafeSender<Odometry_ptr>,
+        cfg: Option<ta_cfg_t>, // pub data: common::Odometry,
     }
 
     impl Odometry
     {
-        pub fn new() -> Self
+        pub fn new(cfg: ta_cfg_t) -> Self
         {
-            let ptr = unsafe { OdometryT_alloc(0) };
+            // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+
+            let ptr = unsafe { Odometry_alloc(&cfg) };
             let mut inner = unsafe { ptr.as_mut().unwrap() };
             Self {
                 // inner,
                 // ptr
                 ptr: UnsafeSender::new(ptr),
+                cfg: Some(cfg),
             }
         }
 
-        pub fn get_ptr(&self) -> &OdometryT_ptr
+        pub fn get_ptr(&self) -> &Odometry_ptr
         {
             self.ptr.get()
         }
 
         pub fn from_ptr(ptr: *mut c_void) -> Self
         {
-            let ptr = ptr as OdometryT_ptr;
-            let mut inner = unsafe { ptr.as_mut().unwrap() };
+            let ptr = ptr as Odometry_ptr;
+            let inner = unsafe { ptr.as_mut().unwrap() };
             Self {
                 // inner,
                 // ptr
                 ptr: UnsafeSender::new(ptr),
+                cfg: None,
             }
         }
         pub fn set_frame_id(&mut self, frame_id: &str, child_frame_id: &str)
@@ -483,7 +656,7 @@ pub mod shared
 
         pub fn get_frame_id(&mut self) -> ManuallyDrop<String>
         {
-            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+            let inner = unsafe { self.ptr.get().as_mut().unwrap() };
 
             nx_common::common::string::string_from_cstr_ptr(
                 inner.frame_id.as_mut_ptr() as *mut u8,
@@ -493,25 +666,25 @@ pub mod shared
 
         pub fn get_stamp(&self) -> u64
         {
-            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+            let inner = unsafe { self.ptr.get().as_mut().unwrap() };
             inner.stamp
         }
         pub fn get_child_frame_id(&mut self) -> ManuallyDrop<String>
         {
-            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+            let inner = unsafe { self.ptr.get().as_mut().unwrap() };
 
             nx_common::common::string::string_from_cstr_ptr(
                 inner.child_frame_id.as_mut_ptr() as *mut u8,
                 inner.child_frame_id.len(),
             )
         }
-        pub fn get_data(&self) -> &OdometryT
+        pub fn get_data(&self) -> &crate::binding::Odometry
         {
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
 
             inner
         }
-        pub fn get_mut_data(&mut self) -> &mut OdometryT
+        pub fn get_mut_data(&mut self) -> &mut crate::binding::Odometry
         {
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
 
@@ -568,6 +741,7 @@ pub mod shared
             // Odometry::from_ptr(self.ptr.ptr as *mut c_void)
             Self {
                 ptr: self.ptr.clone(),
+                cfg: self.cfg,
             }
         }
     }
@@ -575,39 +749,43 @@ pub mod shared
     #[derive(Debug)]
     pub struct Twist
     {
-        ptr: UnsafeSender<TwistT_ptr>,
+        ptr: UnsafeSender<Twist_ptr>,
+        cfg: Option<ta_cfg_t>,
     }
 
     impl Twist
     {
-        pub fn new() -> Self
+        pub fn new(cfg: ta_cfg_t) -> Self
         {
-            let ptr = unsafe { TwistT_alloc(0) };
+            // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+            let ptr = unsafe { Twist_alloc(&cfg) };
             let mut inner = unsafe { ptr.as_mut().unwrap() };
             Self {
                 ptr: UnsafeSender::new(ptr),
+                cfg: Some(cfg),
             }
         }
         pub fn from_ptr(ptr: *mut c_void) -> Self
         {
-            let ptr = ptr as TwistT_ptr;
+            let ptr = ptr as Twist_ptr;
             let mut inner = unsafe { ptr.as_mut().unwrap() };
             Self {
                 ptr: UnsafeSender::new(ptr),
+                cfg: None,
             }
         }
 
-        pub fn get_data(&self) -> &TwistT
+        pub fn get_data(&self) -> &mut crate::binding::Twist
         {
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
             inner
         }
-        pub fn get_mut_data(&mut self) -> &mut TwistT
+        pub fn get_mut_data(&mut self) -> &mut crate::binding::Twist
         {
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
             inner
         }
-        pub fn get_ptr(&self) -> &TwistT_ptr
+        pub fn get_ptr(&self) -> &Twist_ptr
         {
             self.ptr.get()
         }
@@ -619,6 +797,7 @@ pub mod shared
             // Odometry::from_ptr(self.ptr.ptr as *mut c_void)
             Self {
                 ptr: self.ptr.clone(),
+                cfg: self.cfg,
             }
         }
     }

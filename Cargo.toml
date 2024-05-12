@@ -62,4 +62,31 @@ debug = "line-tables-only"
 
 
 [workspace]
-members = [ "crates/nx_common", "crates/nx_practice", "crates/nx_ros", "crates/nx_robot" ]
+members = [ "crates/nx_common",
+#    "crates/nx_practice",
+    "crates/nx_message_center",
+#    "crates/nx_robot",
+    "crates/nx_message_center_test",
+    "crates/nx_gui"]
+
+#
+#[workspace.dependencies]
+#libc = { version = "0.2.153",workspace = true }
+#
+#itertools = { version = "0.11.0",workspace = true }
+##rand = "0.8.5"
+##ndarray = "0.15.6"
+##socket2 = "0.5.5"
+##toml = "0.8.6"
+#signal-hook = { version = "0.3.17",workspace = true }
+#time = { version = "0.3.30" ,features = ["local-offset"]}
+##tokio = "1.33.0"
+#spin_sleep = { version = "1.1.1",workspace = true }
+##colored = "2.0.4"
+#num-traits = { version = "0.2",workspace = true }
+##serde = { version ="1.0.190", features = ["derive"] }
+#tracing = { version = "0.1.40",workspace = true }
+#
+#clap = { version = "4.0", features = ["derive"],workspace = true }
+#serde = { version ="1.0.190", features = ["derive"],workspace = true }
+#socket2 = { version = "0.5.5",workspace = true }

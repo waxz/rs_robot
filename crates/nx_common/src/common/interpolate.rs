@@ -78,12 +78,7 @@ pub fn build_bezier_line<const N: usize>(
 {
     warn!(
         "step: {}, pa : {:?},pb : {:?},pc : {:?},pd : {:?}, pe : {:?}",
-        step,
-        pa,
-        pb,
-        pc,
-        pd,
-        pe
+        step, pa, pb, pc, pd, pe
     );
 
     let mut simple_len: f64 = (vector_2d_dist2!(pa, pb)).sqrt()
@@ -105,10 +100,11 @@ pub fn build_bezier_line<const N: usize>(
     };
 
     let line_de_num = (line_de_len / step) as usize;
-    let line_de_step = line_de_len/(line_de_num as f64);
+    let line_de_step = line_de_len / (line_de_num as f64);
 
-    let line_de_step_x = (pe[0] - pd[0])*line_de_step/line_de_len ;/// (line_de_num as f64);
-    let line_de_step_y = (pe[1] - pd[1])*line_de_step/line_de_len;// / (line_de_num as f64);
+    let line_de_step_x = (pe[0] - pd[0]) * line_de_step / line_de_len;
+    /// (line_de_num as f64);
+    let line_de_step_y = (pe[1] - pd[1]) * line_de_step / line_de_len; // / (line_de_num as f64);
     let mut line_de_update_x: f64 = line_de_step_x;
     let mut line_de_update_y: f64 = line_de_step_y;
 
@@ -305,13 +301,13 @@ pub fn build_bezier_line_from_pose_with_start(
 
     let curve_x = start_pose_in_target_pose_x - len_d;
 
-    let mut c = [ratio[1] * curve_x + len_d, 0.0]; //0.2
-    let mut d = [len_d, 0.0];
+    let c = [ratio[1] * curve_x + len_d, 0.0]; //0.2
+    let d = [len_d, 0.0];
 
     let c = target_pose.multiply_point(&c);
 
     let [c_in_start_pose_x, c_in_start_pose_y] = start_pose_inv.multiply_point(&c[0..2]);
-    let mut b = [ratio[0] * c_in_start_pose_x, 0.0]; // 0.6
+    let b = [ratio[0] * c_in_start_pose_x, 0.0]; // 0.6
 
     let b = start_pose.multiply_point(&b);
 
