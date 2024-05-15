@@ -9,7 +9,7 @@ git-fetch-with-cli = true
 ##    "-Z", "self-profile",
 #
 #]
-rustc-wrapper = "/home/waxz/.cargo/bin/sccache"
+#rustc-wrapper = "/home/waxz/.cargo/bin/sccache"
 target-dir = "/tmp/cargo-target/rust_practice"
 
 

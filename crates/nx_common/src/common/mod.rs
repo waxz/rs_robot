@@ -95,7 +95,6 @@ mod test
     #[test]
     fn test_bench()
     {
-
         log!("run bench test");
         log!("run bench test : {}", "hello");
 

@@ -1,4 +1,4 @@
-https://github.com/rerun-io/rerun/tree/main/examples/rust/extend_viewer_ui
+https://github.com/rerun-io/rerun/TREE/main/examples/rust/extend_viewer_ui
 https://github.com/rerun-io/rerun/blob/0.15.1/examples/rust/extend_viewer_ui/Cargo.toml
 
 

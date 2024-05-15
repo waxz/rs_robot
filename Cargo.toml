@@ -44,7 +44,7 @@ lto = false
 panic = 'unwind'
 incremental = true
 codegen-units = 1
-rpath = false
+rpath = true
 
 
 
@@ -57,6 +57,7 @@ strip = true       #automatic strip symbols from the binary
 opt-level = 2
 incremental = false
 debug = "line-tables-only"
+rpath = true
 
 
 
@@ -66,7 +67,7 @@ members = [ "crates/nx_common",
 #    "crates/nx_practice",
     "crates/nx_message_center",
 #    "crates/nx_robot",
-    "crates/nx_message_center_test",
+#    "crates/nx_message_center_test",
     "crates/nx_gui"]
 
 #

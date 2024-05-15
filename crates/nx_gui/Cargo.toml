@@ -56,3 +56,5 @@ bevy_mod_picking = "0.18.2"
 nx_common = {path = "../nx_common"}
 nx_message_center= {path = "../nx_message_center"}
 bytemuck = "1.15.0"
+serde = { version = "1.0.201", features = ["derive"] }
+log = "0.4.21"

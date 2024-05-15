@@ -53,7 +53,7 @@ struct Args
     #[arg(
         short,
         long,
-        default_value = "/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/bin/dds_config.toml"
+        default_value = "/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/bin/gui_config.toml"
     )]
     dds_config: String,
 }
