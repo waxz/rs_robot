@@ -442,6 +442,11 @@ pub mod shared
             inner_data
         }
 
+        pub fn get_height_width(&self) -> [u32;2]{
+            let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
+            [inner.height, inner.width]
+        }
+
         fn get_dim(&self) -> [u32; 3]
         {
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };

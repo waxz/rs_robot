@@ -7,5 +7,8 @@ pub mod tiny_alloc;
 
 pub mod tcc;
 
+pub mod pointcloud_process;
+
+
 #[test]
 fn test() {}

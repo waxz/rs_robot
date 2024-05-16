@@ -2396,3 +2396,28 @@ extern "C" {
         value: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_int;
 }
+extern "C" {
+    pub fn pointcloud_clip(
+        src_buffer: *mut f32,
+        height: u64_t,
+        width: u64_t,
+        dst_buffer: *mut f32,
+        filter_height_min: u64_t,
+        filter_height_max: u64_t,
+        filter_width_min: u64_t,
+        filter_width_max: u64_t,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn pointcloud_transform(
+        src_buffer: *mut f32,
+        point_num: u64_t,
+        dst_buffer: *mut f32,
+        tx: f32_t,
+        ty: f32_t,
+        tz: f32_t,
+        roll: f32_t,
+        pitch: f32_t,
+        yaw: f32_t,
+    ) -> ::std::os::raw::c_int;
+}

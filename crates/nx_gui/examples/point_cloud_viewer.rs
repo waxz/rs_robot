@@ -19,15 +19,16 @@ use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicBool, Ordering};
 use bevy::app::Update;
-use bevy::log::info;
+use bevy::log::{info,warn,error,debug,debug_once};
 use bevy::prelude::{ButtonInput, Color, KeyCode, MouseButton, Query, Res, ResMut};
 use bevy_egui::{egui, EguiContexts};
-use bevy_egui::egui::{ComboBox, ScrollArea};
+use bevy_egui::egui::{ComboBox, ScrollArea, Slider};
 use bevy_mod_raycast::CursorRay;
 // argument
 use clap::Parser;
 use nx_gui::app_builder::{CameraFocusRay, create_bevy_app};
 use nx_gui::shaders::{InstanceMaterialData, setup_shaders_render, ShaderResConfig};
+use nx_message_center::base::pointcloud_process::perception::pointcloud_clip;
 
 
 //-------------
@@ -66,7 +67,7 @@ struct SimpleState{
 
 
     pub start_select: bool,
-    pub reset_vertex_select_flag : bool,
+    pub reset_vertex : bool,
     pub add_selected_to_vec : bool,
 
     pub vertex_color_hsv_ratio: f32,
@@ -74,8 +75,17 @@ struct SimpleState{
     pub exit:bool,
 
     pub two_cluster_distance_index: [usize;2],
+    pub filter:CloudFilterConfig,
 
-    camera_focus: [f32;3]
+}
+#[derive(Copy, Clone)]
+struct CloudFilterConfig{
+    enable: bool,
+    filter_height_min:u64,
+    filter_height_max:u64,
+    filter_width_min:u64,
+    filter_width_max:u64,
+    point_num: u32,
 }
 
 struct StaticSharedData{
@@ -126,18 +136,25 @@ fn main(){
                 state: Arc::new(Mutex::new(SimpleState {
                     enable_dds_update: true,
                     dds_msg_count: 0,
-                    point_default_scale: 0.005,
-                    point_highlight_selected_scale: 0.005,
+                    point_default_scale: 0.002,
+                    point_highlight_selected_scale: 0.0035,
                     point_highlight_unselected_scale: 0.002,
                     tool_ray_radius: 0.005,
                     tool_ray_distance: 0.1,
                     start_select: false,
-                    reset_vertex_select_flag: false,
+                    reset_vertex: false,
                     add_selected_to_vec: false,
                     vertex_color_hsv_ratio: 5.0,
                     exit: false,
                     two_cluster_distance_index: [0;2],
-                    camera_focus: [0.0;3],
+                    filter: CloudFilterConfig {
+                        enable: false,
+                        filter_height_min: 0,
+                        filter_height_max: 0,
+                        filter_width_min: 0,
+                        filter_width_max: 0,
+                        point_num: 0,
+                    },
                 })),
             }
 
@@ -198,6 +215,10 @@ fn main(){
                         let frame_id = data.get_frame_id();
                         let cloud_float_vec = data.get_data();
 
+                        let cloud_height_width = data.get_height_width();
+
+
+
                         println!(
                             "recv data [{:?}] at {:?},cloud_float_vec.len : {}",
                             frame_id,
@@ -205,26 +226,39 @@ fn main(){
                             cloud_float_vec.len()
                         );
 
-                        float_vec = allocator.realloc_as_array::<f32>(float_vec, cloud_float_vec.len());
+                        let filter =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
 
-                        unsafe{
-                            std::ptr::copy(cloud_float_vec.as_ptr(), float_vec.as_mut_ptr(), cloud_float_vec.len() );
+                        if filter.enable{
+                            let float_vec_len = (filter.filter_height_max - filter.filter_height_min)*(filter.filter_width_max - filter.filter_width_min)*3;
+                            float_vec = allocator.realloc_as_array::<f32>(float_vec, float_vec_len as usize);
+
+                            info!("clip cloud to float_vec_len {} ", float_vec_len);
+                            // use nx_message_center::base::pointcloud_process::perception::pointcloud_clip;
+                            pointcloud_clip(cloud_float_vec.as_ptr() as *mut _,cloud_height_width[0] as u64,cloud_height_width[1] as u64,float_vec.as_mut_ptr(), filter.filter_height_min, filter.filter_height_max, filter.filter_width_min,filter.filter_width_max );
+
+                            {
+                                let float_vec_ptr = float_vec.as_ptr();
+                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
+                                    (UnsafeSender::new(float_vec_ptr), float_vec_len as usize);
+                            }
+                        }else{
+                            float_vec = allocator.realloc_as_array::<f32>(float_vec, cloud_float_vec.len());
+
+                            unsafe{
+                                std::ptr::copy(cloud_float_vec.as_ptr(), float_vec.as_mut_ptr(), cloud_float_vec.len() );
+                            }
+
+
+
+                            {
+                                let float_vec_ptr = float_vec.as_ptr();
+                                let float_vec_len = float_vec.len();
+                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
+                                    (UnsafeSender::new(float_vec_ptr), float_vec_len);
+                            }
                         }
 
-                        // for (i, j) in izip!(cloud_float_vec.iter(), float_vec.iter_mut()) {
-                        //     *j = if (i.is_finite()) { *i } else { 0.0 };
-                        // }
 
-
-                        // println!("cloud_float_vec: {:?}", cloud_float_vec);
-                        // println!("float_vec: {:?}", float_vec);
-
-                        {
-                            let float_vec_ptr = float_vec.as_ptr();
-                            let float_vec_len = float_vec.len();
-                            *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
-                                (UnsafeSender::new(float_vec_ptr), float_vec_len);
-                        }
                     }
 
                 }
@@ -269,9 +303,9 @@ fn update_shader_render_demo(
     }
 
     //-----
-    let  mut reset_vertex_select_flag = GLOBAL_DATA.get().unwrap().state.lock().unwrap().reset_vertex_select_flag;
+    let  mut reset_vertex = GLOBAL_DATA.get().unwrap().state.lock().unwrap().reset_vertex;
 
-    GLOBAL_DATA.get().unwrap().state.lock().unwrap().reset_vertex_select_flag = false;
+    GLOBAL_DATA.get().unwrap().state.lock().unwrap().reset_vertex = false;
     let vertex_color_hsv_ratio= GLOBAL_DATA.get().unwrap().state.lock().unwrap().vertex_color_hsv_ratio;
 
     let  mut add_selected_to_vec = GLOBAL_DATA.get().unwrap().state.lock().unwrap().add_selected_to_vec;
@@ -296,14 +330,20 @@ fn update_shader_render_demo(
 
                 let vec3_data: &[[f32; 3]] =
                     unsafe { slice::from_raw_parts_mut(*ptr.get() as *mut [f32; 3], len / 3) };
-                // println!("vec3_data {:?}, {:?}", vec3_data.len(), vec3_data);
+                let vec3_data_len = vec3_data.len();
 
                 for (_, mut data) in query.iter_mut().enumerate() {
                     let mut data = &mut data.0;
+                    let data_len = data.len();
+                    println!("update cloud scale, vec3_data_len {:?}, data_len {:?}", vec3_data_len, data_len);
 
-                    for (i, b) in data.iter_mut().enumerate() {
-
+                    if vec3_data_len > data_len{
+                        warn!("vec3_data_len: [{}] > allocate data_len: [{}]", vec3_data_len,data_len );
+                        return;
+                    }
+                    for i in 0.. vec3_data_len{
                         let a = vec3_data[i];
+                        let  b = &mut data[i];
                         b.position.x = a[0];
                         b.position.y = a[1];
                         b.position.z = a[2];
@@ -315,10 +355,48 @@ fn update_shader_render_demo(
                         b.color[2] = h.b();
                         b.color[3] = h.a();
                         b.scale = point_default_scale;
+                    }
+                    for i in vec3_data_len..data_len{
+                        data[i].scale = 0.0;
+                    }
+
+                    #[cfg(notuse)]
+
+                    for (i, b) in data.iter_mut().enumerate() {
+
+                        if( i < vec3_data_len){
+                            let a = vec3_data[i];
+                            b.position.x = a[0];
+                            b.position.y = a[1];
+                            b.position.z = a[2];
+                            let r = (a[0]*a[0] + a[1]*a[1] + a[2]*a[2] ).sqrt();
+
+                            let h = Color::hsl(r*distance_ratio,0.5,0.5).as_rgba();
+                            b.color[0] = h.r();
+                            b.color[1] = h.g();
+                            b.color[2] = h.b();
+                            b.color[3] = h.a();
+                            b.scale = point_default_scale;
+                        }else{
+                            b.scale = 0.0;
+                        }
+
 
                     }
 
+
                     if start_select{
+                        for i in 0.. vec3_data_len{
+                            let a = vec3_data[i];
+                            let  b = &mut data[i];
+                            b.scale  = if(b.selected > 0) {
+                                point_highlight_selected_scale
+
+                            }else {
+                                point_highlight_unselected_scale
+                            }
+                        }
+                        #[cfg(notuse)]
                         for b in data.iter_mut(){
                             b.scale  = if(b.selected > 0) {
                                 point_highlight_selected_scale
@@ -329,7 +407,7 @@ fn update_shader_render_demo(
                         }
 
                         if add_selected_to_vec{
-                            let index_vec:Vec<_> =  data.iter().enumerate().filter_map(|(i,b)|{
+                            let index_vec:Vec<_> =  data.iter().enumerate().take(vec3_data_len).filter_map(|(i,b)|{
                                 if b.selected > 0{
                                     Some(i)
                                 }else {
@@ -341,13 +419,14 @@ fn update_shader_render_demo(
                             // info!("index_vec len: {}, {:?}",index_vec.len(),index_vec);
                             if !index_vec.is_empty(){
                                 GLOBAL_DATA.get().unwrap().tool_selected_points_index.lock().unwrap().push(index_vec);
-                                reset_vertex_select_flag = true;
+                                reset_vertex = true;
                             }
                         }
 
-                        if reset_vertex_select_flag{
+                        if reset_vertex{
                             for b in data.iter_mut(){
                                 b.selected = 0;
+
                             }
                         }
                     }
@@ -376,13 +455,14 @@ fn raycast_picker(cursor_ray: Res<CursorRay>,  mut query: Query<&mut InstanceMat
     let start_select =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().start_select;
     let camera_focus =  camera_ray.camera_focus;
 
-    if !start_select{
-        return;
-    }
     let tool_ray_radius =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().tool_ray_radius;
 
     let tool_ray_distance =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().tool_ray_distance;
     camera_ray.tool_ray_distance = tool_ray_distance;
+    if !start_select{
+        return;
+    }
+
 
         {
 
@@ -415,8 +495,13 @@ fn raycast_picker(cursor_ray: Res<CursorRay>,  mut query: Query<&mut InstanceMat
 
                     let mut data = &mut data.0;
 
-                    for (i, v) in data.iter_mut().enumerate() {
 
+                    let vec3_len = GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().1;
+                    let vec3_len = vec3_len/3;
+
+                    for i in 0..vec3_len {
+
+                        let v = &mut data[i];
                         let entity =  Point3f{
                             x : v.position.x,
                             y : v.position.y,
@@ -448,16 +533,7 @@ fn create_egui_windows(mut contexts: EguiContexts)
     let mut style = (*ctx.style()).clone();
 
     style.visuals = egui::Visuals::light();
-// Redefine text_styles
-//     style. text_styles = [
-//         (Heading, FontId::new(30.0, Proportional)),
-//         (Name("Heading2".into()), FontId::new(25.0, Proportional)),
-//         (Name("Context".into()), FontId::new(23.0, Proportional)),
-//         (Body, FontId::new(18.0, Proportional)),
-//         (Monospace, FontId::new(14.0, Proportional)),
-//         (Button, FontId::new(14.0, Proportional)),
-//         (Small, FontId::new(10.0, Proportional)),
-//     ].into();
+
 
 // Mutate global style with above changes
     ctx. set_style(style);
@@ -481,7 +557,7 @@ fn create_egui_windows(mut contexts: EguiContexts)
 
 
                     if ui.button("Reset").clicked(){
-                        GLOBAL_DATA.get().unwrap().state.lock().unwrap().reset_vertex_select_flag = true;
+                        GLOBAL_DATA.get().unwrap().state.lock().unwrap().reset_vertex = true;
                     }
 
                     if ui.button("Add").clicked(){
@@ -604,7 +680,50 @@ fn create_egui_windows(mut contexts: EguiContexts)
 
     });
 
-    egui::Window::new("Transform").resizable(true).show(ctx, |ui|{
+    egui::Window::new("Filter").resizable(true).show(ctx, |ui|{
+
+        let [height, width] = GLOBAL_DATA.get().unwrap().cloud_dim;
+        //=====
+        let mut filter_height_min  = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.filter_height_min;
+
+        ui.add(Slider::new(&mut filter_height_min, 0..=height as u64).text("filter_height_min"));
+        GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.filter_height_min= filter_height_min;
+
+        //====
+        //=====
+        let mut filter_height_max  = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.filter_height_max;
+
+        ui.add(Slider::new(&mut filter_height_max, filter_height_min..=height as u64).text("filter_height_max"));
+        GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.filter_height_max= filter_height_max;
+
+        //====
+        //=====
+        let mut filter_width_min  = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.filter_width_min;
+
+        ui.add(Slider::new(&mut filter_width_min, 0..=width as u64).text("filter_width_min"));
+        GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.filter_width_min= filter_width_min;
+
+        //====
+        //=====
+        let mut filter_width_max  = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.filter_width_max;
+
+        ui.add(Slider::new(&mut filter_width_max, filter_width_min..=width as u64).text("filter_width_max"));
+        GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.filter_width_max= filter_width_max;
+
+        //====
+        let range_ok =   ( filter_width_min < filter_width_max
+        && filter_height_min < filter_height_max
+        ) ;
+
+        if range_ok{
+
+            let  mut enable =   GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.enable ;
+            ui.checkbox( &mut enable, "Enable", );
+            GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.enable = enable;
+        }else{
+            GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter.enable = false;
+
+        }
 
     });
 

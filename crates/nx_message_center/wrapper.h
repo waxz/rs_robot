@@ -5,3 +5,4 @@
 #include "message_center_types.h"
 
 #include "tcc_builder.h"
+#include "pointcloud_process.h"

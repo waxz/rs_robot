@@ -149,7 +149,8 @@ fn main()
     // buld_use_rust_cmake_config();
     // println!("cargo:rustc-link-lib=static=cpp_liba");
 
-    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib -Clink-arg=-fuse-ld=gold");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib");
+    println!("cargo:rustc-link-arg=-fuse-ld=gold");
 
     println!("cargo:rustc-link-search=native=/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib");
     println!("cargo:rustc-link-arg=-Wl,-rpath,/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib");
@@ -157,6 +158,8 @@ fn main()
     println!("cargo:rustc-link-lib=dds_helper_shared");
     println!("cargo:rustc-link-lib=tinyalloc");
     println!("cargo:rustc-link-lib=tcc_builder");
+    println!("cargo:rustc-link-lib=pointcloud_process");
+
     // println!("cargo:rustc-flags=-L/home/waxz/CLionProjects/libroscpp/cmake-build-release-host/install/lib -lros_helper -ldds_helper_shared -ltinyalloc -ltcc_builder ");
 
     let output = if cfg!(target_os = "windows") {
