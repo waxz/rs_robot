@@ -41,7 +41,6 @@ fn main()
 
     app.add_systems(Update, update_shader_render_demo);
 
-
     app.run();
     println!("exit {:?}", get_current_cpu());
 }
@@ -51,11 +50,10 @@ fn main()
 fn set_shader_render_demo(mut config: ResMut<ShaderResConfig>)
 {
     config.enable = true;
-    config.number = 100 * 100 * 100;
+    config.static_point_num = 100 * 100 * 100;
     config.run_count = 0;
     info!("set_shader_render_demo: {:?}", config);
 }
-
 
 fn update_shader_render_demo(
     mut query: Query<&mut InstanceMaterialData>,
@@ -64,7 +62,7 @@ fn update_shader_render_demo(
 {
     info!("update_shader_render_demo : {:?}", config);
 
-    if config.enable && config.number == 100 * 100 * 100 {
+    if config.enable && config.static_point_num == 100 * 100 * 100 {
         let extent = 10.0 / 2.0;
 
         let jump = extent / 100 as f32;
@@ -99,7 +97,7 @@ fn update_shader_render_demo(
                             }
                         }
                     }
-                }else{
+                } else {
                     let rotate = 0.05;
 
                     for (i, v) in data.iter_mut().enumerate() {

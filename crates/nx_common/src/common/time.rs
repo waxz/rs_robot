@@ -5,7 +5,9 @@ use time::{OffsetDateTime, UtcOffset};
 pub fn get_timezone_offset() -> UtcOffset
 {
     static TZ_OFFSET: OnceLock<UtcOffset> = OnceLock::new();
-    TZ_OFFSET.get_or_init(|| UtcOffset::current_local_offset().expect("Warning! get local offset failed!"));
+    TZ_OFFSET.get_or_init(|| {
+        UtcOffset::current_local_offset().expect("Warning! get local offset failed!")
+    });
     *TZ_OFFSET.get().unwrap()
 }
 /// must call before thread creation

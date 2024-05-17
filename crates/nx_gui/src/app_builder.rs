@@ -1,7 +1,6 @@
-use std::f32::consts::PI;
 use nx_common::common::signal_handler::SignalHandler;
+use std::f32::consts::PI;
 //BEVY
-use bevy_mod_picking::prelude::*;
 use bevy_mod_raycast::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin, TouchControls};
 
@@ -36,6 +35,7 @@ use bevy::{
     window::{PresentMode, RequestRedraw, WindowPlugin},
     winit::WinitSettings,
 };
+use bevy::winit::WinitWindows;
 // use bevy::ui::AlignItems::Default;
 use bevy_egui::egui::FontFamily::Proportional;
 use bevy_egui::egui::TextStyle::{Body, Button, Heading, Monospace, Name, Small};
@@ -81,7 +81,10 @@ pub fn create_bevy_app(bg_color: [f32; 3], winit_wait_ms: [u64; 2]) -> App
 fn setup_window_camera(mut commands: Commands)
 {
     //
-    commands.insert_resource(WindowState { exit: false, signal: Default::default() });
+    commands.insert_resource(WindowState {
+        exit: false,
+        signal: Default::default(),
+    });
 
     commands.insert_resource(CameraFocusRay {
         tool_ray_distance: 0.05,
@@ -184,7 +187,7 @@ pub struct CameraFocusRay
 pub struct WindowState
 {
     exit: bool,
-    signal: SignalHandler
+    signal: SignalHandler,
 }
 
 fn camera_keyboard_controls(
@@ -317,8 +320,7 @@ fn camera_keyboard_controls(
 
 fn window_exit(mut exit: EventWriter<AppExit>, mut window_state: ResMut<WindowState>)
 {
-    if window_state.exit || !window_state.signal.is_run()
-    {
+    if window_state.exit || !window_state.signal.is_run() {
         info!("window_exit send exit signal");
         exit.send(AppExit);
     }

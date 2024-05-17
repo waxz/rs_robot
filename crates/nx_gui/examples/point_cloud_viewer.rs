@@ -11,11 +11,12 @@ use nx_message_center::base::common_message::shared::PointCloud2;
 use std::f32::consts::{PI, TAU};
 use std::f64::consts::FRAC_PI_2;
 use std::ffi::c_void;
-use std::ops::Deref;
-use std::slice;
+use std::ops::{BitAnd, Deref};
+use std::{fs, slice};
+use std::io::Write;
 use time::{OffsetDateTime, UtcOffset};
 
-use bevy::app::{Startup, Update};
+use bevy::app::{App, Startup, Update};
 use bevy::log::{debug, debug_once, error, info, warn};
 use bevy::math::quat;
 use bevy::prelude::{
@@ -25,10 +26,13 @@ use bevy::prelude::{
 use bevy_egui::egui::{ComboBox, ScrollArea, Slider};
 use bevy_egui::{egui, EguiContexts};
 use bevy_mod_raycast::CursorRay;
+
+
 use rand::{thread_rng, Rng};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, MutexGuard};
+use bevy::DefaultPlugins;
 // argument
 use clap::Parser;
 use nx_gui::app_builder::{create_bevy_app, CameraFocusRay};
@@ -36,7 +40,7 @@ use nx_gui::shaders::{setup_shaders_render, InstanceMaterialData, ShaderResConfi
 use nx_message_center::base::pointcloud_process::perception::{
     pointcloud_clip, pointcloud_transform,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 //-------------
 
@@ -53,12 +57,6 @@ struct Args
         default_value = "/home/waxz/RustroverProjects/rust_practice/crates/nx_gui/config/gui_config.toml"
     )]
     dds_config: String,
-
-    #[arg(long, default_value_t = 480)]
-    height: usize,
-
-    #[arg(long, default_value_t = 640)]
-    width: usize,
 }
 
 //------------------
@@ -86,18 +84,9 @@ struct SimpleState
     pub operator_mode : u32,
     pub operator_run : bool,
 }
-#[derive(Copy, Clone)]
-struct CloudFilterConfig
-{
-    enable: bool,
-    filter_height_min: u64,
-    filter_height_max: u64,
-    filter_width_min: u64,
-    filter_width_max: u64,
-    point_num: u32,
-}
 
-#[derive(Debug, Deserialize, Copy, Clone)]
+
+#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
 struct Pose
 {
     tx: f32,
@@ -107,16 +96,67 @@ struct Pose
     pitch: f32,
     yaw: f32,
 }
-#[derive(Debug, Deserialize, Copy, Clone)]
+
+#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
+struct CloudDimConfig{
+    height:usize,
+    width:usize,
+
+}
+#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
+struct CloudFilterConfig
+{
+    enable_dim: Option<bool>,
+    filter_height_min: u64,
+    filter_height_max: u64,
+    filter_width_min: u64,
+    filter_width_max: u64,
+
+    enable_range: Option<bool>,
+    filter_x_min: f32,
+    filter_y_min: f32,
+    filter_z_min: f32,
+    filter_x_max: f32,
+    filter_y_max: f32,
+    filter_z_max: f32,
+
+}
+
+#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
+struct CloudConfig
+{
+    dim:CloudDimConfig,
+    filter:CloudFilterConfig,
+}
+#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
+struct GuiConfig{
+    extrinsic: PoseMarker,
+    cloud: CloudConfig,
+
+}
+#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
+struct AppConfig{
+    gui: GuiConfig,
+
+}
+
+#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
 struct PoseMarker
 {
     pose: Pose,
     enable: bool,
 }
 
+struct CloudFloatVecBuffer{
+    raw_buffer: UnsafeSender<*const f32>,
+    transform_buffer: UnsafeSender<*const f32>,
+    render_buffer: UnsafeSender<*const f32>,
+    float_num : usize,
+
+}
 struct StaticSharedData
 {
-    pub cloud_buffer: Arc<Mutex<(UnsafeSender<*const f32>, usize)>>,
+    pub cloud_buffer: Arc<Mutex<CloudFloatVecBuffer>>,
     pub cloud_dim: [usize; 2],
     pub state: Arc<Mutex<SimpleState>>,
 
@@ -126,8 +166,9 @@ struct StaticSharedData
     // multiple pick group 1
     // multiple pick group 2
     // multiple pick group 3
-    pub tool_selected_points_index: Arc<Mutex<Vec<Vec<usize>>>>,
+    pub tool_selected_points_index: Arc<Mutex<Vec<Vec<u64>>>>,
     pub marker_pose: Arc<Mutex<Vec<PoseMarker>>>,
+    pub extrinsic: Arc<Mutex<PoseMarker>>
 }
 
 static GLOBAL_DATA: OnceLock<StaticSharedData> = OnceLock::new();
@@ -141,22 +182,59 @@ fn main()
     );
     let allocator = tiny_alloc::TinyAlloc::new(memory_pool_base, TA_BUFFER_SIZE - 8, 512, 16, 8);
 
+    println!("what's up");
     let args = Args::parse();
+    let config_file = & args.dds_config;
 
-    let mut float_vec = allocator.alloc_as_array::<f32>((args.width * args.height * 3) as usize);
+    println!("load toml file : {:?}",config_file);
+
+    let contents = match fs::read_to_string(config_file) {
+        // If successful return the files text as `contents`.
+        // `c` is a local variable.
+        Ok(c) => c,
+        // Handle the `error` case.
+        Err(_) => {
+            // Write `msg` to `stderr`.
+            println!("Could not read file `{}`", config_file);
+            // Exit the program with exit code `1`.
+            return;
+        }
+    };
+    println!("contents:\n{:?}",contents);
+
+    let mut app_config: AppConfig; // = toml::from_str(&contents).unwrap();
+
+    match toml::from_str::<AppConfig>(&contents) {
+        Ok(t) => app_config = t,
+        Err(e) => {
+            println!("toml::from_str: {:?}", e);
+            return;
+        }
+    }
+
+    let cloud_dim = app_config.gui.cloud.dim;
+
+
+    let mut raw_float_vec = allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+    let mut transform_float_vec = allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
 
     {
-        let float_vec_ptr = float_vec.as_ptr();
-        let float_vec_len = float_vec.len();
+        let raw_float_vec_ptr = raw_float_vec.as_ptr();
+        let transform_float_vec_ptr = transform_float_vec.as_ptr();
+        let raw_float_vec_len = raw_float_vec.len();
+
         GLOBAL_DATA.get_or_init(move || {
             println!("set crate::GLOBAL_DATA::BUFFER");
             StaticSharedData {
-                cloud_dim: [args.height, args.width],
+                cloud_dim: [cloud_dim.height, cloud_dim.width],
 
-                cloud_buffer: Arc::new(Mutex::new((
-                    UnsafeSender::new(float_vec_ptr),
-                    float_vec_len,
-                ))),
+                cloud_buffer: Arc::new(Mutex::new(crate::CloudFloatVecBuffer{
+                    raw_buffer: UnsafeSender::new(raw_float_vec_ptr),
+                    transform_buffer: UnsafeSender::new(transform_float_vec_ptr),
+                    render_buffer: UnsafeSender::new(raw_float_vec_ptr),
+                    float_num: raw_float_vec_len,
+                }
+                )),
                 tool_selected_points_index: Arc::new(Mutex::new(vec![])),
                 state: Arc::new(Mutex::new(SimpleState {
                     enable_dds_update: true,
@@ -173,17 +251,24 @@ fn main()
                     exit: false,
                     two_cluster_distance_index: [0; 2],
                     filter: CloudFilterConfig {
-                        enable: false,
+                        enable_dim: Some(false),
                         filter_height_min: 0,
                         filter_height_max: 0,
                         filter_width_min: 0,
                         filter_width_max: 0,
-                        point_num: 0,
+                        enable_range: Some(false),
+                        filter_x_min: 0.0,
+                        filter_y_min: 0.0,
+                        filter_z_min: 0.0,
+                        filter_x_max: 0.0,
+                        filter_y_max: 0.0,
+                        filter_z_max: 0.0,
                     },
                     operator_mode: 0,
                     operator_run: false,
                 })),
                 marker_pose: Arc::new(Mutex::new(vec![])),
+                extrinsic: Arc::new(Mutex::new(app_config.gui.extrinsic)),
             }
         });
 
@@ -207,6 +292,8 @@ fn main()
     app.add_systems(Update, raycast_picker);
     app.add_systems(Startup, setup_help_info);
     app.add_systems(Update, plot_marker);
+
+
 
     let mut dds_thread = Thread::default();
 
@@ -262,13 +349,16 @@ fn main()
 
                         let filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
 
-                        if filter.enable {
+                        if filter.enable_dim.unwrap() {
                             let float_vec_len = (filter.filter_height_max
                                 - filter.filter_height_min)
                                 * (filter.filter_width_max - filter.filter_width_min)
                                 * 3;
-                            float_vec = allocator
-                                .realloc_as_array::<f32>(float_vec, float_vec_len as usize);
+                            raw_float_vec = allocator
+                                .realloc_as_array::<f32>(raw_float_vec, float_vec_len as usize);
+                            transform_float_vec = allocator
+                                .realloc_as_array::<f32>(transform_float_vec, float_vec_len as usize);
+
 
                             info!("clip cloud to float_vec_len {} ", float_vec_len);
                             // use nx_message_center::base::pointcloud_process::perception::pointcloud_clip;
@@ -276,7 +366,7 @@ fn main()
                                 cloud_float_vec.as_ptr() as *mut _,
                                 cloud_height_width[0] as u64,
                                 cloud_height_width[1] as u64,
-                                float_vec.as_mut_ptr(),
+                                raw_float_vec.as_mut_ptr(),
                                 filter.filter_height_min,
                                 filter.filter_height_max,
                                 filter.filter_width_min,
@@ -284,30 +374,42 @@ fn main()
                             );
 
                             {
-                                let float_vec_ptr = float_vec.as_ptr();
-                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
-                                    (UnsafeSender::new(float_vec_ptr), float_vec_len as usize);
+                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() = CloudFloatVecBuffer{
+                                    raw_buffer:  UnsafeSender::new(raw_float_vec.as_ptr()),
+                                    transform_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
+                                    render_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
+                                    float_num: raw_float_vec.len(),
+                                };
                             }
                         } else {
-                            float_vec =
-                                allocator.realloc_as_array::<f32>(float_vec, cloud_float_vec.len());
+                            raw_float_vec =
+                                allocator.realloc_as_array::<f32>(raw_float_vec, cloud_float_vec.len());
+
+                            transform_float_vec =
+                                allocator.realloc_as_array::<f32>(transform_float_vec, cloud_float_vec.len());
+
 
                             unsafe {
                                 std::ptr::copy(
                                     cloud_float_vec.as_ptr(),
-                                    float_vec.as_mut_ptr(),
+                                    raw_float_vec.as_mut_ptr(),
                                     cloud_float_vec.len(),
                                 );
                             }
 
                             {
-                                let float_vec_ptr = float_vec.as_ptr();
-                                let float_vec_len = float_vec.len();
-                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
-                                    (UnsafeSender::new(float_vec_ptr), float_vec_len);
+
+                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() = CloudFloatVecBuffer{
+                                    raw_buffer:  UnsafeSender::new(raw_float_vec.as_ptr()),
+                                    transform_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
+                                    render_buffer:UnsafeSender::new(raw_float_vec.as_ptr()),
+                                    float_num: raw_float_vec.len(),
+                                };
                             }
                         }
                     }
+
+
                 }
                 GLOBAL_DATA
                     .get()
@@ -316,6 +418,42 @@ fn main()
                     .lock()
                     .unwrap()
                     .dds_msg_count = dds_msg_count;
+
+                let extrinsic = *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
+
+                if (dds_msg_count > 0 && extrinsic.enable ){
+                    {
+
+
+                        if let Ok(ref mut mutex) =  GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock(){
+                               let CloudFloatVecBuffer{raw_buffer, transform_buffer, render_buffer, float_num}  = **mutex;
+                               pointcloud_transform(
+                                   *raw_buffer.get() as *mut _,
+                                   (float_num as u64)/3 ,
+                                   *transform_buffer.get() as *mut _,
+                                   extrinsic.pose.tx,
+                                   extrinsic.pose.ty,
+                                   extrinsic.pose.tz,
+                                   extrinsic.pose.roll,
+                                   extrinsic.pose.pitch,
+                                   extrinsic.pose.yaw,
+                               );
+                           }
+
+
+                    }
+
+                    let transform_buffer = GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().transform_buffer;
+
+                    GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().render_buffer = transform_buffer;
+                    info!("render_buffer=transform_buffer extrinsic: {:?}",extrinsic);
+                }else{
+
+                    let raw_buffer = GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().raw_buffer;
+                    GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().render_buffer = raw_buffer;
+                    info!("render_buffer=raw_buffer")
+
+                }
 
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
@@ -330,6 +468,22 @@ fn main()
     app.run();
 
     signal.stop();
+
+    app_config.gui.extrinsic = *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
+    app_config.gui.cloud.filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
+
+    let output_filename = "/tmp/gui_output.toml";
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(output_filename).unwrap();
+
+    let toml_data  = toml::to_string(&app_config).unwrap();
+    file.write_all(&toml_data.to_string().as_bytes());
+    println!("app_config data : \n{} \noutput to : {}",toml_data, output_filename);
+
 }
 
 fn setup_help_info(mut commands: Commands)
@@ -358,7 +512,8 @@ fn set_shader_render_demo(mut config: ResMut<ShaderResConfig>)
 {
     let cloud_dim = GLOBAL_DATA.get().unwrap().cloud_dim;
     config.enable = true;
-    config.number = cloud_dim[0] * cloud_dim[1];
+    config.static_point_num = cloud_dim[0] * cloud_dim[1];
+    config.dynamic_point_num = 0;
     config.run_count = 0;
     info!("set_shader_render_demo: {:?}", config);
 }
@@ -369,7 +524,7 @@ fn update_shader_render_demo(
 {
     // info!("update_shader_render_demo : {:?}", config);
 
-    if !config.enable || config.number == 0 || config.run_count == 0 {
+    if !config.enable || config.static_point_num == 0 || config.run_count == 0 {
         // info!("update_shader_render_demo skip : {:?}", config);
 
         return;
@@ -452,11 +607,15 @@ fn update_shader_render_demo(
     {
         if let Some(buffer) = GLOBAL_DATA.get() {
             if let Ok(ref mut mutex) = buffer.cloud_buffer.try_lock() {
-                let (ptr, len) = **mutex;
+                let CloudFloatVecBuffer{raw_buffer, transform_buffer, render_buffer, float_num} = **mutex;
+
+
 
                 let vec3_data: &[[f32; 3]] =
-                    unsafe { slice::from_raw_parts_mut(*ptr.get() as *mut [f32; 3], len / 3) };
+                    unsafe { slice::from_raw_parts_mut(*render_buffer.get() as *mut [f32; 3], float_num / 3) };
                 let vec3_data_len = vec3_data.len();
+
+                config.dynamic_point_num = vec3_data_len;
 
                 for (_, mut data) in query.iter_mut().enumerate() {
                     let mut data = &mut data.0;
@@ -536,7 +695,7 @@ fn update_shader_render_demo(
                                 .iter()
                                 .enumerate()
                                 .take(vec3_data_len)
-                                .filter_map(|(i, b)| if b.selected > 0 { Some(i) } else { None })
+                                .filter_map(|(i, b)| if b.selected > 0 { Some(i as u64) } else { None })
                                 .collect();
 
                             // let index_vec:Vec<_> = data.iter().enumerate().take_while(|(i,b)|{b.selected > 0}).map(|(i,b)| i).collect();
@@ -575,6 +734,8 @@ fn raycast_picker(
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     key_input: Res<ButtonInput<KeyCode>>,
     mut camera_ray: ResMut<CameraFocusRay>,
+    mut config: ResMut<ShaderResConfig>,
+
 )
 {
     // start select
@@ -632,8 +793,8 @@ fn raycast_picker(
                 for (_, mut data) in query.iter_mut().enumerate() {
                     let mut data = &mut data.0;
 
-                    let vec3_len = GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().1;
-                    let vec3_len = vec3_len / 3;
+                    // let vec3_len = GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().float_num;
+                    let vec3_len = config.dynamic_point_num;
 
                     for i in 0..vec3_len {
                         let v = &mut data[i];
@@ -664,12 +825,21 @@ fn plot_marker(mut gizmos: Gizmos)
             let mut p1 = [1.0f32, 0.0, 0.0];
 
             let rect_len = 0.3;
+            let axis_len = 0.3;
 
             let mut p2 = [0.0f32; 3];
             let mut plain_points: [f32; 12] = [
                 0.0, -rect_len, -rect_len, 0.0, -rect_len, rect_len, 0.0, rect_len, rect_len, 0.0,
                 rect_len, -rect_len,
             ];
+
+            let mut axis =  [
+                axis_len, 0.0, 0.0,
+                0.0, rect_len, 0.0,
+                0.0, 0.0, rect_len,
+            ];;
+            let mut axis_abs = [0.0f32;9];
+
             let mut plain_points_abs = [0.0; 12];
             pointcloud_transform(
                 p1.as_mut_ptr(),
@@ -693,6 +863,34 @@ fn plot_marker(mut gizmos: Gizmos)
                 marker.pose.pitch,
                 marker.pose.yaw,
             );
+            pointcloud_transform(
+                axis.as_mut_ptr(),
+                3,
+                axis_abs.as_mut_ptr(),
+                0.0,
+                0.0,
+                0.0,
+                marker.pose.roll,
+                marker.pose.pitch,
+                marker.pose.yaw,
+            );
+
+            gizmos.ray(Vec3 {
+                x: marker.pose.tx,
+                y: marker.pose.ty,
+                z: marker.pose.tz,
+            }, Vec3::new(axis_abs[0],axis_abs[1],axis_abs[2]), Color::RED);
+            gizmos.ray(Vec3 {
+                x: marker.pose.tx,
+                y: marker.pose.ty,
+                z: marker.pose.tz,
+            }, Vec3::new(axis_abs[3],axis_abs[4],axis_abs[5]), Color::GREEN);
+            gizmos.ray(Vec3 {
+                x: marker.pose.tx,
+                y: marker.pose.ty,
+                z: marker.pose.tz,
+            }, Vec3::new(axis_abs[6],axis_abs[7],axis_abs[8]), Color::BLUE);
+
 
             let [qw, qx, qy, qz] = nx_common::common::transform2d::euler_to_quaternion(
                 marker.pose.roll as f64,
@@ -745,11 +943,7 @@ fn plot_marker(mut gizmos: Gizmos)
                         x: plain_points_abs[0],
                         y: plain_points_abs[1],
                         z: plain_points_abs[2],
-                    },Vec3 {
-                    x: plain_points_abs[6],
-                    y: plain_points_abs[7],
-                    z: plain_points_abs[8],
-                },
+                    },
                 ],
                 Color::Rgba {
                     red: 0.0,
@@ -762,7 +956,9 @@ fn plot_marker(mut gizmos: Gizmos)
     }
 }
 
-fn create_egui_windows(mut contexts: EguiContexts)
+fn create_egui_windows(mut contexts: EguiContexts,
+                       mut gizmos: Gizmos
+)
 {
     let ctx = contexts.ctx_mut();
     // Get current context style
@@ -1108,129 +1304,117 @@ Click Reser to clear current indexes.
         }
     });
 
+    egui::Window::new("Extrinsic").resizable(true).show(ctx, |ui|{
+
+        let mut extrinsic = GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap().clone();
+
+        ui.checkbox(&mut extrinsic.enable, "Enable extrinsic");
+
+        ui.add(
+            egui::DragValue::new(&mut extrinsic.pose.tx)
+                .speed(0.001)
+                .clamp_range(-5.0..=5.0)
+                .prefix("tx: "),
+        );
+
+        ui.add(
+            egui::DragValue::new(&mut extrinsic.pose.ty)
+                .speed(0.001)
+                .clamp_range(-5.0..=5.0)
+                .prefix("ty: "),
+        );
+        ui.add(
+            egui::DragValue::new(&mut extrinsic.pose.tz)
+                .speed(0.001)
+                .clamp_range(-5.0..=5.0)
+                .prefix("tz: "),
+        );
+        ui.add(
+            egui::DragValue::new(&mut extrinsic.pose.roll)
+                .speed(0.00001)
+                .clamp_range(-TAU..=TAU)
+                .prefix("roll: "),
+        );
+        ui.add(
+            egui::DragValue::new(&mut extrinsic.pose.pitch)
+                .speed(0.00001)
+                .clamp_range(-TAU..=TAU)
+                .prefix("pitch: "),
+        );
+        ui.add(
+            egui::DragValue::new(&mut extrinsic.pose.yaw)
+                .speed(0.00001)
+                .clamp_range(-TAU..=TAU)
+                .prefix("yaw: "),
+        );
+
+        *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap() = extrinsic;
+    });
+
     egui::Window::new("Filter").resizable(true).show(ctx, |ui| {
         let [height, width] = GLOBAL_DATA.get().unwrap().cloud_dim;
+        let mut filter = GLOBAL_DATA
+            .get()
+            .unwrap()
+            .state
+            .lock()
+            .unwrap()
+            .filter;
+
         //=====
-        let mut filter_height_min = GLOBAL_DATA
-            .get()
-            .unwrap()
-            .state
-            .lock()
-            .unwrap()
-            .filter
-            .filter_height_min;
 
-        ui.add(Slider::new(&mut filter_height_min, 0..=height as u64).text("filter_height_min"));
-        GLOBAL_DATA
-            .get()
-            .unwrap()
-            .state
-            .lock()
-            .unwrap()
-            .filter
-            .filter_height_min = filter_height_min;
 
-        //====
-        //=====
-        let mut filter_height_max = GLOBAL_DATA
-            .get()
-            .unwrap()
-            .state
-            .lock()
-            .unwrap()
-            .filter
-            .filter_height_max;
+        ui.add(Slider::new(&mut filter.filter_height_min, 0..=height as u64).text("filter_height_min"));
 
-        ui.add(
-            Slider::new(&mut filter_height_max, filter_height_min..=height as u64)
-                .text("filter_height_max"),
-        );
-        GLOBAL_DATA
-            .get()
-            .unwrap()
-            .state
-            .lock()
-            .unwrap()
-            .filter
-            .filter_height_max = filter_height_max;
+        ui.add(Slider::new(&mut filter.filter_height_max, filter.filter_height_min..=height as u64).text("filter_height_max"), );
 
-        //====
-        //=====
-        let mut filter_width_min = GLOBAL_DATA
-            .get()
-            .unwrap()
-            .state
-            .lock()
-            .unwrap()
-            .filter
-            .filter_width_min;
+        ui.add(Slider::new(&mut filter.filter_width_min, 0..=width as u64).text("filter_width_min"));
 
-        ui.add(Slider::new(&mut filter_width_min, 0..=width as u64).text("filter_width_min"));
-        GLOBAL_DATA
-            .get()
-            .unwrap()
-            .state
-            .lock()
-            .unwrap()
-            .filter
-            .filter_width_min = filter_width_min;
+        ui.add(Slider::new(&mut filter.filter_width_max, filter.filter_width_min..=width as u64).text("filter_width_max"), );
 
-        //====
-        //=====
-        let mut filter_width_max = GLOBAL_DATA
-            .get()
-            .unwrap()
-            .state
-            .lock()
-            .unwrap()
-            .filter
-            .filter_width_max;
+        ui.add(Slider::new(&mut filter.filter_x_min, -5.0..=5.0).text("filter_x_min"));
+        ui.add(Slider::new(&mut filter.filter_x_max, filter.filter_x_min..=5.0).text("filter_x_max"));
+        ui.add(Slider::new(&mut filter.filter_y_min, -5.0..=5.0).text("filter_y_min"));
+        ui.add(Slider::new(&mut filter.filter_y_max, filter.filter_y_min..=5.0).text("filter_y_max"));
+        ui.add(Slider::new(&mut filter.filter_z_min, -5.0..=5.0).text("filter_z_min"));
+        ui.add(Slider::new(&mut filter.filter_z_max, filter.filter_z_min..=5.0).text("filter_z_max"));
 
-        ui.add(
-            Slider::new(&mut filter_width_max, filter_width_min..=width as u64)
-                .text("filter_width_max"),
-        );
-        GLOBAL_DATA
-            .get()
-            .unwrap()
-            .state
-            .lock()
-            .unwrap()
-            .filter
-            .filter_width_max = filter_width_max;
 
-        //====
+
+        let dim_ok =
+            (filter.filter_width_min < filter.filter_width_max && filter.filter_height_min < filter.filter_height_max);
         let range_ok =
-            (filter_width_min < filter_width_max && filter_height_min < filter_height_max);
+            (filter.filter_x_min < filter.filter_x_max && filter.filter_y_min < filter.filter_y_max  && filter.filter_z_min < filter.filter_z_max );
 
-        if range_ok {
-            let mut enable = GLOBAL_DATA
-                .get()
-                .unwrap()
-                .state
-                .lock()
-                .unwrap()
-                .filter
-                .enable;
-            ui.checkbox(&mut enable, "Enable");
-            GLOBAL_DATA
-                .get()
-                .unwrap()
-                .state
-                .lock()
-                .unwrap()
-                .filter
-                .enable = enable;
+        if dim_ok {
+            let mut enable =filter
+                .enable_dim;
+            let mut enable = enable.unwrap();
+            ui.checkbox(&mut enable, "Enable dim filter");
+
+            filter.enable_dim = Some(enable);
         } else {
-            GLOBAL_DATA
-                .get()
-                .unwrap()
-                .state
-                .lock()
-                .unwrap()
-                .filter
-                .enable = false;
+             filter .enable_dim = Some(false);
         }
+        if range_ok {
+            let mut enable =filter
+                .enable_range;
+            let mut enable = enable.unwrap();
+            ui.checkbox(&mut enable, "Enable range filter");
+
+            filter.enable_range = Some(enable);
+        } else {
+            filter .enable_range = Some(false);
+        }
+
+        GLOBAL_DATA
+            .get()
+            .unwrap()
+            .state
+            .lock()
+            .unwrap()
+            .filter
+            = filter;
     });
 
     egui::Window::new("Operator")
@@ -1265,7 +1449,6 @@ Click Reser to clear current indexes.
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut operator_panel,  1 , "cluster");
                 ui.selectable_value(&mut operator_panel,  2 , "marker");
-                ui.selectable_value(&mut operator_panel,  3 , "norm");
 
             });
             ui.separator();
@@ -1283,6 +1466,8 @@ Click Reser to clear current indexes.
             GLOBAL_DATA.get().unwrap().state.lock().unwrap().operator_mode = operator_panel;
 
             let mut operator_run = GLOBAL_DATA.get().unwrap().state.lock().unwrap().operator_run;
+            ui.checkbox(&mut operator_run, "operator_run");
+            GLOBAL_DATA.get().unwrap().state.lock().unwrap().operator_run = operator_run;
 
 
             let [mut from_index, mut to_index] = GLOBAL_DATA
@@ -1292,6 +1477,8 @@ Click Reser to clear current indexes.
                 .lock()
                 .unwrap()
                 .two_cluster_distance_index;
+
+
 
             match operator_panel{
                 1 => {
@@ -1318,18 +1505,137 @@ Click Reser to clear current indexes.
                             });
 
 
-                        if (from_index != to_index) {
-                            let mut from_center = [0.0, 0.0, 0.0];
-                            let mut to_center = [0.0, 0.0, 0.0];
 
-                            ui.checkbox(&mut operator_run, "operator_run");
 
-                            // if ui.button("compute distance").clicked() {}
-                            // let mut from_sum =  GLOBAL_DATA.get().unwrap().tool_selected_points_index.lock().unwrap()[from_index].iter().reduce(|acc, e| acc + e).unwrap();
-                        }else{
-                            operator_run = false;
-                        }
-                        GLOBAL_DATA.get().unwrap().state.lock().unwrap().operator_run = operator_run;
+                         if operator_run{
+                             let mut from_cluster_cx = 0.0;
+                             let mut from_cluster_cy = 0.0;
+                             let mut from_cluster_cz = 0.0;
+
+                             let mut from_cluster_nx = 0.0;
+                             let mut from_cluster_ny = 0.0;
+                             let mut from_cluster_nz = 0.0;
+                             let mut from_cluster_nd = 0.0;
+
+                             let mut to_cluster_cx = 0.0;
+                             let mut to_cluster_cy = 0.0;
+                             let mut to_cluster_cz = 0.0;
+
+                             let mut to_cluster_nx = 0.0;
+                             let mut to_cluster_ny = 0.0;
+                             let mut to_cluster_nz = 0.0;
+                             let mut to_cluster_nd = 0.0;
+
+                             let viewerpoint = * GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
+
+                             let [vx, vy, vz] = if viewerpoint.enable{
+                                 [viewerpoint.pose.tx,viewerpoint.pose.ty,viewerpoint.pose.tz, ]
+                             }else{
+                                 [0.0;3]
+                             };
+
+                             //==
+                             // if let Some(buffer) = GLOBAL_DATA.get()
+
+                             {
+
+                                 let CloudFloatVecBuffer { raw_buffer, transform_buffer, render_buffer, float_num } =
+                                 *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap();
+
+                                 {
+
+                                     let mut index = &mut GLOBAL_DATA
+                                         .get()
+                                         .unwrap()
+                                         .tool_selected_points_index
+                                         .lock()
+                                         .unwrap()[from_index];
+
+
+                                     nx_message_center::base::pointcloud_process::perception::pointcloud_norm(*render_buffer.get() as *mut _, (float_num as u64 )/3, index.as_mut_ptr() , index.len() as u64, vx, vy,vz, &mut from_cluster_cx, &mut from_cluster_cy, &mut from_cluster_cz, &mut from_cluster_nx, &mut from_cluster_ny, &mut from_cluster_nz, &mut from_cluster_nd);
+
+                                 }
+
+                                 let from_center = Point3f{
+                                     x: from_cluster_cx,
+                                     y: from_cluster_cy,
+                                     z: from_cluster_cz,
+                                 };
+
+                                 ui.label(format!("from_index :center: [{}, {}, {}], norm: [{}, {}, {}, {}]", from_cluster_cx, from_cluster_cy, from_cluster_cz, from_cluster_nx, from_cluster_ny, from_cluster_nz, from_cluster_nd));
+
+
+                                 gizmos. ray(Vec3{
+                                     x: from_cluster_cx,
+                                     y: from_cluster_cy,
+                                     z: from_cluster_cz,
+                                 }, Vec3{
+                                     x: from_cluster_nx * 0.1,
+                                     y: from_cluster_ny* 0.1,
+                                     z: from_cluster_nz* 0.1,
+                                 }, Color::GREEN);
+
+                                 if (from_index != to_index) {
+
+                                     {
+
+                                         let mut index = &mut GLOBAL_DATA
+                                             .get()
+                                             .unwrap()
+                                             .tool_selected_points_index
+                                             .lock()
+                                             .unwrap()[to_index];
+
+
+                                         nx_message_center::base::pointcloud_process::perception::pointcloud_norm(*render_buffer.get() as *mut _, (float_num as u64 )/3, index.as_mut_ptr() , index.len() as u64, vx, vy,vz, &mut to_cluster_cx, &mut to_cluster_cy, &mut to_cluster_cz, &mut to_cluster_nx, &mut to_cluster_ny, &mut to_cluster_nz, &mut to_cluster_nd);
+
+                                     }
+
+
+                                     let to_center = Point3f{
+                                         x: to_cluster_cx,
+                                         y: to_cluster_cy,
+                                         z: to_cluster_cz,
+                                     };
+                                     let from_to_distance = (from_center - to_center).length();
+
+                                     ui.label(format!("to_index :center: [{}, {}, {}], norm: [{}, {}, {}, {}]", to_cluster_cx, to_cluster_cy, to_cluster_cz, to_cluster_nx, to_cluster_ny, to_cluster_nz, to_cluster_nd));
+
+
+                                     ui.label(format!("distance: {} m ", from_to_distance));
+
+
+                                     gizmos.line(Vec3{
+                                         x: from_cluster_cx,
+                                         y: from_cluster_cy,
+                                         z: from_cluster_cz,
+                                     }, Vec3{
+                                         x: to_cluster_cx,
+                                         y: to_cluster_cy,
+                                         z: to_cluster_cz,
+                                     }, Color::YELLOW);
+
+                                     gizmos. ray(Vec3{
+                                         x: to_cluster_cx,
+                                         y: to_cluster_cy,
+                                         z: to_cluster_cz,
+                                     }, Vec3{
+                                         x: to_cluster_nx* 0.1,
+                                         y: to_cluster_ny* 0.1,
+                                         z: to_cluster_nz* 0.1,
+                                     }, Color::GREEN);
+                                 }
+
+
+
+
+                             }
+
+                                     //===
+
+
+
+                         }
 
                     }
                 },
@@ -1354,23 +1660,131 @@ Click Reser to clear current indexes.
                               }
                           });
 
-                      ui.checkbox(&mut operator_run, "operator_run");
-                      GLOBAL_DATA.get().unwrap().state.lock().unwrap().operator_run = operator_run;
+                      let marker = GLOBAL_DATA.get().unwrap().marker_pose.lock().unwrap()[to_index];
+
+                      if operator_run{
+
+                          let mut from_cluster_cx = 0.0;
+                          let mut from_cluster_cy = 0.0;
+                          let mut from_cluster_cz = 0.0;
+
+                          let mut from_cluster_nx = 0.0;
+                          let mut from_cluster_ny = 0.0;
+                          let mut from_cluster_nz = 0.0;
+                          let mut from_cluster_nd = 0.0;
+
+                          let mut to_cluster_cx = 0.0;
+                          let mut to_cluster_cy = 0.0;
+                          let mut to_cluster_cz = 0.0;
+
+                          let mut to_cluster_nx = 0.0;
+                          let mut to_cluster_ny = 0.0;
+                          let mut to_cluster_nz = 0.0;
+                          let mut to_cluster_nd = 0.0;
+
+                          let viewerpoint = * GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
+
+                          let [vx, vy, vz] = if viewerpoint.enable{
+                              [viewerpoint.pose.tx,viewerpoint.pose.ty,viewerpoint.pose.tz, ]
+                          }else{
+                              [0.0;3]
+                          };
+
+                          {
+
+                              let CloudFloatVecBuffer { raw_buffer, transform_buffer, render_buffer, float_num } =
+                                  *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap();
+
+                              {
+
+                                  let mut index = &mut GLOBAL_DATA
+                                      .get()
+                                      .unwrap()
+                                      .tool_selected_points_index
+                                      .lock()
+                                      .unwrap()[from_index];
+
+
+                                  nx_message_center::base::pointcloud_process::perception::pointcloud_norm(*render_buffer.get() as *mut _, (float_num as u64 )/3, index.as_mut_ptr() , index.len() as u64, vx, vy,vz, &mut from_cluster_cx, &mut from_cluster_cy, &mut from_cluster_cz, &mut from_cluster_nx, &mut from_cluster_ny, &mut from_cluster_nz, &mut from_cluster_nd);
+
+                              }
+
+                              let from_center = Point3f{
+                                  x: from_cluster_cx,
+                                  y: from_cluster_cy,
+                                  z: from_cluster_cz,
+                              };
+
+                              ui.label(format!("from_index :center: [{}, {}, {}], norm: [{}, {}, {}, {}]", from_cluster_cx, from_cluster_cy, from_cluster_cz, from_cluster_nx, from_cluster_ny, from_cluster_nz, from_cluster_nd));
+
+
+                              gizmos. ray(Vec3{
+                                  x: from_cluster_cx,
+                                  y: from_cluster_cy,
+                                  z: from_cluster_cz,
+                              }, Vec3{
+                                  x: from_cluster_nx * 0.1,
+                                  y: from_cluster_ny* 0.1,
+                                  z: from_cluster_nz* 0.1,
+                              }, Color::GREEN);
+
+                          }
+
+                          {
+                              let mut cluster_center = [from_cluster_cx, from_cluster_cy, from_cluster_cz];
+                              let mut cluster_center_in_marker = [from_cluster_cx, from_cluster_cy, from_cluster_cz];
+
+                              let mut itx = 0.0;
+                              let mut ity = 0.0;
+                              let mut itz = 0.0;
+                              let mut iroll = 0.0;
+                              let mut ipitch = 0.0;
+                              let mut iyaw = 0.0;
+
+                              nx_message_center::base::pointcloud_process::perception::se3_inverse(
+                                  marker.pose.tx,
+                                  marker.pose.ty,
+                                  marker.pose.tz,
+                                  marker.pose.roll,
+                                  marker.pose.pitch,
+                                  marker.pose.yaw,
+                                  &mut itx,
+                                  &mut ity,
+                                  &mut itz,
+                                  &mut iroll,
+                                  &mut ipitch,
+                                  &mut iyaw,
+
+                              );
+
+                              let marker =
+                              pointcloud_transform(
+                                  cluster_center.as_mut_ptr(),
+                                  1,
+                                  cluster_center_in_marker.as_mut_ptr(),
+                                  itx,
+                                  ity,
+                                  itz,
+                                  iroll,
+                                  ipitch,
+                                  iyaw,
+                              );
+
+                              ui.label(format!("from_index in marker :center: [{}, {}, {}]", cluster_center_in_marker[0], cluster_center_in_marker[1], cluster_center_in_marker[2]));
+
+
+                          }
+
+
+
+                      }
+
 
 
                   }
 
                 },
                 3 => {
-                    ComboBox::from_label("from_index")
-                        .selected_text(from_index.to_string())
-                        .show_ui(ui, |ui| {
-                            for i in 0..tool_selected_points_index_len {
-                                ui.selectable_value(&mut from_index, i, i.to_string());
-                            }
-                        });
-                    ui.checkbox(&mut operator_run, "operator_run");
-                    GLOBAL_DATA.get().unwrap().state.lock().unwrap().operator_run = operator_run;
 
                 },
                 _ => {

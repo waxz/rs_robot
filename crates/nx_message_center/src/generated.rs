@@ -2396,6 +2396,82 @@ extern "C" {
         value: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_int;
 }
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct PointIndex {
+    pub buffer: *mut f32,
+    pub point_num: u64_t,
+}
+#[test]
+fn bindgen_test_layout_PointIndex() {
+    const UNINIT: ::std::mem::MaybeUninit<PointIndex> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<PointIndex>(),
+        16usize,
+        concat!("Size of: ", stringify!(PointIndex))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<PointIndex>(),
+        8usize,
+        concat!("Alignment of ", stringify!(PointIndex))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).buffer) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(buffer)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).point_num) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(point_num)
+        )
+    );
+}
+pub type PointIndex_ptr = *mut PointIndex;
+extern "C" {
+    pub fn se3_inverse(
+        tx: f32_t,
+        ty: f32_t,
+        tz: f32_t,
+        roll: f32_t,
+        pitch: f32_t,
+        yaw: f32_t,
+        tx_inv: *mut f32_t,
+        ty_inv: *mut f32_t,
+        tz_inv: *mut f32_t,
+        roll_inv: *mut f32_t,
+        pitch_inv: *mut f32_t,
+        yaw_inv: *mut f32_t,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn pointcloud_norm(
+        src_buffer: *mut f32,
+        point_num: u64_t,
+        index_buffer: *mut u64_t,
+        index_num: u64_t,
+        vx: f32_t,
+        vy: f32_t,
+        vz: f32_t,
+        cx: *mut f32_t,
+        cy: *mut f32_t,
+        cz: *mut f32_t,
+        nx: *mut f32_t,
+        ny: *mut f32_t,
+        nz: *mut f32_t,
+        nd: *mut f32_t,
+    ) -> ::std::os::raw::c_int;
+}
 extern "C" {
     pub fn pointcloud_clip(
         src_buffer: *mut f32,

@@ -1,13 +1,4 @@
-use std::f32::consts::PI;
 //BEVY
-use bevy_mod_picking::prelude::*;
-use bevy_mod_raycast::prelude::*;
-use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin, TouchControls};
-
-use bevy::app::AppExit;
-use bevy::pbr::CascadeShadowConfigBuilder;
-use bevy::render::camera::RenderTarget;
-use bevy::window::WindowRef;
 use bevy::{
     core_pipeline::core_3d::Transparent3d,
     ecs::{
@@ -35,13 +26,7 @@ use bevy::{
     window::{PresentMode, RequestRedraw, WindowPlugin},
     winit::WinitSettings,
 };
-// use bevy::ui::AlignItems::Default;
-use bevy_egui::egui::FontFamily::Proportional;
-use bevy_egui::egui::TextStyle::{Body, Button, Heading, Monospace, Name, Small};
-use bevy_egui::egui::{CollapsingHeader, ComboBox, RichText, ScrollArea, Ui};
-use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use bytemuck::{Pod, Zeroable};
-use itertools::Itertools;
 
 //--------------------------
 
@@ -50,15 +35,17 @@ use itertools::Itertools;
 pub struct ShaderResConfig
 {
     pub enable: bool,
-    pub number: usize,
+    pub static_point_num: usize,
     pub run_count: usize,
+    pub dynamic_point_num: usize,
+
 }
 fn run_if_shader_need_initialise(config: Res<ShaderResConfig>) -> bool
 {
-    config.enable && config.number > 0 && config.run_count == 0
+    config.enable && config.static_point_num > 0 && config.run_count == 0
 }
 
-pub fn setup_shaders_render<M>(mut app: &mut App, systems: impl IntoSystemConfigs<M>,)
+pub fn setup_shaders_render<M>(mut app: &mut App, systems: impl IntoSystemConfigs<M>)
 {
     app.add_plugins(CustomMaterialPlugin)
         .add_systems(Startup, create_render_resource)
@@ -72,8 +59,9 @@ pub fn create_render_resource(mut commands: Commands)
 {
     commands.insert_resource(ShaderResConfig {
         enable: false,
-        number: 0,
+        static_point_num: 0,
         run_count: 0,
+        dynamic_point_num: 0,
     });
 }
 
@@ -92,7 +80,7 @@ fn create_shaders_buffer(
             color: [1.0, 1.0, 1.0, 0.0,],
             selected: 0,
         };
-        config.number
+        config.static_point_num
     ];
 
     commands.spawn((
