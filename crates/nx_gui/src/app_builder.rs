@@ -8,6 +8,7 @@ use bevy::app::AppExit;
 use bevy::pbr::CascadeShadowConfigBuilder;
 use bevy::render::camera::RenderTarget;
 use bevy::window::WindowRef;
+use bevy::winit::WinitWindows;
 use bevy::{
     core_pipeline::core_3d::Transparent3d,
     ecs::{
@@ -35,7 +36,6 @@ use bevy::{
     window::{PresentMode, RequestRedraw, WindowPlugin},
     winit::WinitSettings,
 };
-use bevy::winit::WinitWindows;
 // use bevy::ui::AlignItems::Default;
 use bevy_egui::egui::FontFamily::Proportional;
 use bevy_egui::egui::TextStyle::{Body, Button, Heading, Monospace, Name, Small};

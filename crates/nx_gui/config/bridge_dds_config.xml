@@ -1,0 +1,395 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+    <log>
+        <!--
+        Clear consumers
+        -->
+        <use_default>false</use_default>
+
+        <!--
+        StdoutConsumer does not have any properties
+        -->
+        <consumer>
+            <class>StdoutConsumer</class>
+        </consumer>
+
+        <!--
+        StdoutErrConsumer with threshold set to Log::Kind::Error
+        -->
+        <consumer>
+            <class>StdoutErrConsumer</class>
+            <property>
+                <name>stderr_threshold</name>
+                <value>Log::Kind::Error</value>
+            </property>
+        </consumer>
+
+        <!--
+        FileConsumer openning "execution.log" in append mode
+        -->
+        <consumer>
+            <class>FileConsumer</class>
+            <property>
+                <name>filename</name>
+                <value>execution.log</value>
+            </property>
+            <property>
+                <name>append</name>
+                <value>true</value>
+            </property>
+        </consumer>
+
+        <!--
+        ThreadSettings for the log's consumer thread
+        -->
+        <thread_settings>
+            <scheduling_policy>-1</scheduling_policy>
+            <priority>0</priority>
+            <affinity>0</affinity>
+            <stack_size>-1</stack_size>
+        </thread_settings>
+    </log>
+    <profiles>
+        <transport_descriptors>
+
+            <!-- Create a descriptor for the new transport -->
+            <transport_descriptor>
+                <transport_id>shm_transport</transport_id>
+                <type>SHM</type> <!-- REQUIRED -->
+<!--                <maxMessageSize>524288</maxMessageSize> &lt;!&ndash; OPTIONAL uint32 valid of all transports&ndash;&gt;-->
+<!--                <segment_size>104857600</segment_size> &lt;!&ndash; OPTIONAL uint32 SHM only&ndash;&gt;-->
+<!--                <port_queue_capacity>1024</port_queue_capacity> &lt;!&ndash; OPTIONAL uint32 SHM only&ndash;&gt;-->
+<!--                <healthy_check_timeout_ms>250</healthy_check_timeout_ms> &lt;!&ndash; OPTIONAL uint32 SHM only&ndash;&gt;-->
+<!--                <rtps_dump_file>test_file.dump</rtps_dump_file> &lt;!&ndash; OPTIONAL string SHM only&ndash;&gt;-->
+            </transport_descriptor>
+
+            <!-- TCPv4 sample transport descriptor -->
+
+            <transport_descriptor>
+                <transport_id>TCPv4_TRANSPORT_DESCRIPTOR</transport_id>
+                <type>TCPv4</type>
+                <keep_alive_frequency_ms>1000</keep_alive_frequency_ms>
+                <keep_alive_timeout_ms>10000</keep_alive_timeout_ms>
+                <calculate_crc>false</calculate_crc>
+                <check_crc>false</check_crc>
+                <enable_tcp_nodelay>true</enable_tcp_nodelay>
+                <listening_ports>
+                    <port>7400</port>
+                </listening_ports>
+            </transport_descriptor>
+
+            <!-- UDPv4 sample transport descriptor -->
+            <transport_descriptor>
+                <transport_id>UDPv4_TRANSPORT_DESCRIPTOR</transport_id>
+                <type>UDPv4</type>
+            </transport_descriptor>
+            <!-- SHM sample transport descriptor -->
+            <transport_descriptor>
+                <transport_id>SHM_TRANSPORT_DESCRIPTOR</transport_id>
+                <type>SHM</type> <!-- REQUIRED -->
+                <maxMessageSize>524288</maxMessageSize> <!-- OPTIONAL uint32 valid of all transports-->
+                <segment_size>1048576</segment_size> <!-- OPTIONAL uint32 SHM only-->
+                <port_queue_capacity>1024</port_queue_capacity> <!-- OPTIONAL uint32 SHM only-->
+                <healthy_check_timeout_ms>250</healthy_check_timeout_ms> <!-- OPTIONAL uint32 SHM only-->
+                <rtps_dump_file>/tmp/test_shm.dump</rtps_dump_file> <!-- OPTIONAL string SHM only-->
+            </transport_descriptor>
+
+            <transport_descriptor>
+                <transport_id>FILTER_TCPv4_TRANSPORT_DESCRIPTOR</transport_id>
+                <type>TCPv4</type>
+
+                <interfaces>
+                    <allowlist>
+                        <interface name="lo" netmask_filter="OFF"/>
+
+                        <!--                        <interface name="eno1" netmask_filter="OFF"/>-->
+                        <!--                        <interface name="enx00e04d71ffe7" netmask_filter="AUTO"/>-->
+
+
+                    </allowlist>
+                    <blocklist>
+
+                        <interface name="eno1"/>
+                        <interface name="enx00e04d71ffe7"/>
+
+
+                        <interface name="wlp4s0"/>
+
+                        <interface name="wlp3s0"/>
+
+                        <interface name="docker0"/>
+                        <interface name="wt0"/>
+
+                    </blocklist>
+                </interfaces>
+            </transport_descriptor>
+
+            <transport_descriptor>
+                <transport_id>FILTER_UDPv4_TRANSPORT_DESCRIPTOR</transport_id>
+                <type>UDPv4</type>
+
+                <interfaces>
+                    <allowlist>
+                        <interface name="lo" netmask_filter="OFF"/>
+
+                        <!--                        <interface name="eno1" netmask_filter="OFF"/>-->
+                        <!--                        <interface name="enx00e04d71ffe7" netmask_filter="AUTO"/>-->
+
+                    </allowlist>
+                    <blocklist>
+
+                        <interface name="eno1"/>
+                        <interface name="enx00e04d71ffe7"/>
+
+                        <interface name="br-22f843f4be4c"/>
+
+                        <interface name="wlp4s0"/>
+
+                        <interface name="wlp3s0"/>
+
+                        <interface name="docker0"/>
+                        <interface name="wt0"/>
+
+                    </blocklist>
+                </interfaces>
+            </transport_descriptor>
+
+
+        </transport_descriptors>
+
+        <participant profile_name="participant_discovery_protocol_CLIENT">
+            <rtps>
+                <name>participant_discovery_protocol_CLIENT</name>
+
+                <builtin>
+                    <discovery_config>
+                        <!-- Set participant as CLIENT -->
+                        <discoveryProtocol>CLIENT</discoveryProtocol>
+                        <!--
+                            Set list of remote servers. This list may contain one or
+                            more <RemoteServer> tags
+                        -->
+                        <clientAnnouncementPeriod>
+                            <!-- change default to 250 ms -->
+                            <nanosec>1000000000</nanosec>
+                        </clientAnnouncementPeriod>
+                        <discoveryServersList>
+                            <!--
+                                Set remote server configuration:
+                                    - Prefix
+                                    - PDP listening locator
+                            -->
+                            <RemoteServer prefix="44.53.00.5f.45.50.52.4f.53.49.4d.41">
+                                <metatrafficUnicastLocatorList>
+                                    <!-- Set SERVER's listening locator for PDP -->
+                                    <locator>
+                                        <udpv4>
+                                            <address>127.0.0.1</address>
+                                            <port>11811</port>
+                                        </udpv4>
+                                    </locator>
+                                </metatrafficUnicastLocatorList>
+                            </RemoteServer>
+
+                            <RemoteServer prefix="44.53.00.5f.45.50.52.4f.53.49.4d.41">
+                                <metatrafficUnicastLocatorList>
+                                    <!-- Set SERVER's listening locator for PDP -->
+                                    <locator>
+                                        <udpv4>
+                                            <address>10.141.110.12</address>
+                                            <port>11811</port>
+                                        </udpv4>
+                                    </locator>
+                                </metatrafficUnicastLocatorList>
+                            </RemoteServer>
+
+                            <RemoteServer prefix="44.53.00.5f.45.50.52.4f.53.49.4d.41">
+                                <metatrafficUnicastLocatorList>
+                                    <!-- Set SERVER's listening locator for PDP -->
+                                    <locator>
+                                        <udpv4>
+                                            <address>100.115.133.144</address>
+                                            <port>11811</port>
+                                        </udpv4>
+                                    </locator>
+                                </metatrafficUnicastLocatorList>
+                            </RemoteServer>
+
+                        </discoveryServersList>
+
+                    </discovery_config>
+                </builtin>
+            </rtps>
+        </participant>
+
+        <participant profile_name="participant_discovery_protocol_SERVER">
+            <rtps>
+                <name>participant_discovery_protocol_SERVER</name>
+
+                <!-- Set SERVER's GUID prefix -->
+                <prefix>44.53.00.5f.45.50.52.4f.53.49.4d.41</prefix>
+                <builtin>
+                    <!-- Set participant as SERVER -->
+                    <discovery_config>
+                        <discoveryProtocol>SERVER</discoveryProtocol>
+                        <!--
+                            Set a list of remote servers to which this server connects.
+                            This list may contain one or more <RemoteServer> tags
+                        -->
+
+                        <discoveryServersList>
+                            <!--
+                                Set remote server configuration:
+                                    - Prefix
+                                    - PDP listening locator
+                            -->
+                            <RemoteServer prefix="44.53.01.5f.45.50.52.4f.53.49.4d.41">
+                                <metatrafficUnicastLocatorList>
+                                    <!-- Set SERVER's listening locator for PDP -->
+                                    <locator>
+                                        <udpv4>
+                                            <address>127.0.0.1</address>
+                                            <port>11812</port>
+                                        </udpv4>
+                                    </locator>
+                                </metatrafficUnicastLocatorList>
+                            </RemoteServer>
+                        </discoveryServersList>
+                    </discovery_config>
+                    <!-- Set SERVER's listening locator for PDP -->
+                    <metatrafficUnicastLocatorList>
+                        <locator>
+                            <udpv4>
+                                <address>127.0.0.1</address>
+                                <port>11811</port>
+                            </udpv4>
+                        </locator>
+                    </metatrafficUnicastLocatorList>
+                </builtin>
+            </rtps>
+        </participant>
+
+
+
+
+        <participant profile_name="participant_discovery_protocol_SIMPLE">
+            <rtps>
+                <name>participant_discovery_protocol_SIMPLE app</name>
+
+
+                <userTransports>
+                    <transport_id>FILTER_UDPv4_TRANSPORT_DESCRIPTOR</transport_id>
+                    <transport_id>FILTER_TCPv4_TRANSPORT_DESCRIPTOR</transport_id>
+                    <transport_id>shm_transport</transport_id>
+                </userTransports>
+                <useBuiltinTransports>false</useBuiltinTransports>
+<!--                <ignore_non_matching_locators>true</ignore_non_matching_locators>-->
+
+
+                <builtin>
+                    <discovery_config>
+                        <EDP>SIMPLE</EDP>
+                        <simpleEDP>
+                            <PUBWRITER_SUBREADER>true</PUBWRITER_SUBREADER>
+                            <PUBREADER_SUBWRITER>true</PUBREADER_SUBWRITER>
+                        </simpleEDP>
+                        <leaseDuration>
+                            <sec>10</sec>
+                            <nanosec>20</nanosec>
+                        </leaseDuration>
+                        <leaseAnnouncement>
+                            <sec>5</sec>
+                            <nanosec>2</nanosec>
+                        </leaseAnnouncement>
+
+
+                    </discovery_config>
+
+                </builtin>
+            </rtps>
+        </participant>
+
+        <data_writer profile_name="shm_writer_profile" is_default_profile="true">
+            <qos>
+                <reliability>
+                    <kind>BEST_EFFORT</kind>
+                </reliability>
+                <data_sharing>
+                    <kind>ON</kind>
+                    <shared_dir>/tmp/</shared_dir>
+                </data_sharing>
+                <durability>
+                    <kind>TRANSIENT_LOCAL</kind>
+                </durability>
+            </qos>
+            <topic>
+                <historyQos>
+                    <kind>KEEP_LAST</kind>
+                    <depth>10</depth>
+                </historyQos>
+            </topic>
+        </data_writer>
+        <data_reader profile_name="shm_subscriber_profile" is_default_profile="true">
+            <qos>
+                <reliability>
+                    <kind>BEST_EFFORT</kind>
+                </reliability>
+                <data_sharing>
+                    <kind>ON</kind>
+                    <shared_dir>/tmp</shared_dir>
+                </data_sharing>
+                <durability>
+                    <kind>TRANSIENT_LOCAL</kind>
+                </durability>
+            </qos>
+            <topic>
+                <historyQos>
+                    <kind>KEEP_LAST</kind>
+                    <depth>10</depth>
+                </historyQos>
+            </topic>
+        </data_reader>
+
+
+        <data_writer profile_name="writer_profile_qos_datasharing">
+            <qos>
+                <data_sharing>
+                    <kind>AUTOMATIC</kind>
+                </data_sharing>
+            </qos>
+        </data_writer>
+
+        <data_reader profile_name="reader_profile_qos_datasharing">
+            <qos>
+                <data_sharing>
+                    <kind>AUTOMATIC</kind>
+                    <shared_dir>/tmp/</shared_dir>
+                </data_sharing>
+            </qos>
+        </data_reader>
+
+
+
+        <data_reader profile_name="reader_xml_conf_multicast_locators_profile">
+            <multicastLocatorList>
+                <locator>
+                    <udpv4>
+                        <address>127.0.0.1</address>
+                        <port>7900</port>
+                    </udpv4>
+                </locator>
+            </multicastLocatorList>
+        </data_reader>
+
+        <topic profile_name="topic_profile">
+            <!-- ... -->
+        </topic>
+
+
+    </profiles>
+
+    <library_settings>
+        <intraprocess_delivery>FULL</intraprocess_delivery> <!-- OFF | USER_DATA_ONLY | FULL -->
+    </library_settings>
+
+</dds>

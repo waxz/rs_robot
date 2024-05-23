@@ -2399,8 +2399,18 @@ extern "C" {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct PointIndex {
-    pub buffer: *mut f32,
+    pub src_buffer: *mut f32_t,
     pub point_num: u64_t,
+    pub index_buffer: *mut u64_t,
+    pub index_num: u64_t,
+    pub program: u64_t,
+    pub weight: f32_t,
+    pub target_tx: f32_t,
+    pub target_ty: f32_t,
+    pub target_tz: f32_t,
+    pub target_roll: f32_t,
+    pub target_pitch: f32_t,
+    pub target_yaw: f32_t,
 }
 #[test]
 fn bindgen_test_layout_PointIndex() {
@@ -2408,7 +2418,7 @@ fn bindgen_test_layout_PointIndex() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<PointIndex>(),
-        16usize,
+        72usize,
         concat!("Size of: ", stringify!(PointIndex))
     );
     assert_eq!(
@@ -2417,13 +2427,13 @@ fn bindgen_test_layout_PointIndex() {
         concat!("Alignment of ", stringify!(PointIndex))
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).buffer) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).src_buffer) as usize - ptr as usize },
         0usize,
         concat!(
             "Offset of field: ",
             stringify!(PointIndex),
             "::",
-            stringify!(buffer)
+            stringify!(src_buffer)
         )
     );
     assert_eq!(
@@ -2436,8 +2446,126 @@ fn bindgen_test_layout_PointIndex() {
             stringify!(point_num)
         )
     );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).index_buffer) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(index_buffer)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).index_num) as usize - ptr as usize },
+        24usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(index_num)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).program) as usize - ptr as usize },
+        32usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(program)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).weight) as usize - ptr as usize },
+        40usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(weight)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).target_tx) as usize - ptr as usize },
+        44usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(target_tx)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).target_ty) as usize - ptr as usize },
+        48usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(target_ty)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).target_tz) as usize - ptr as usize },
+        52usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(target_tz)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).target_roll) as usize - ptr as usize },
+        56usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(target_roll)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).target_pitch) as usize - ptr as usize },
+        60usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(target_pitch)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).target_yaw) as usize - ptr as usize },
+        64usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointIndex),
+            "::",
+            stringify!(target_yaw)
+        )
+    );
 }
 pub type PointIndex_ptr = *mut PointIndex;
+extern "C" {
+    pub fn pointcloud_calib(
+        indexes: PointIndex_ptr,
+        indexes_num: u64_t,
+        tx: f32_t,
+        ty: f32_t,
+        tz: f32_t,
+        roll: f32_t,
+        pitch: f32_t,
+        yaw: f32_t,
+        tx_result: *mut f32_t,
+        ty_result: *mut f32_t,
+        tz_result: *mut f32_t,
+        roll_result: *mut f32_t,
+        pitch_result: *mut f32_t,
+        yaw_result: *mut f32_t,
+    ) -> ::std::os::raw::c_int;
+}
 extern "C" {
     pub fn se3_inverse(
         tx: f32_t,
@@ -2456,7 +2584,7 @@ extern "C" {
 }
 extern "C" {
     pub fn pointcloud_norm(
-        src_buffer: *mut f32,
+        src_buffer: *mut f32_t,
         point_num: u64_t,
         index_buffer: *mut u64_t,
         index_num: u64_t,
@@ -2474,10 +2602,10 @@ extern "C" {
 }
 extern "C" {
     pub fn pointcloud_clip(
-        src_buffer: *mut f32,
+        src_buffer: *mut f32_t,
         height: u64_t,
         width: u64_t,
-        dst_buffer: *mut f32,
+        dst_buffer: *mut f32_t,
         filter_height_min: u64_t,
         filter_height_max: u64_t,
         filter_width_min: u64_t,
@@ -2486,9 +2614,9 @@ extern "C" {
 }
 extern "C" {
     pub fn pointcloud_transform(
-        src_buffer: *mut f32,
+        src_buffer: *mut f32_t,
         point_num: u64_t,
-        dst_buffer: *mut f32,
+        dst_buffer: *mut f32_t,
         tx: f32_t,
         ty: f32_t,
         tz: f32_t,
@@ -2496,4 +2624,261 @@ extern "C" {
         pitch: f32_t,
         yaw: f32_t,
     ) -> ::std::os::raw::c_int;
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct PointCloudBuffer {
+    pub buffer: *mut f32_t,
+    pub float_num: u64_t,
+}
+#[test]
+fn bindgen_test_layout_PointCloudBuffer() {
+    const UNINIT: ::std::mem::MaybeUninit<PointCloudBuffer> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<PointCloudBuffer>(),
+        16usize,
+        concat!("Size of: ", stringify!(PointCloudBuffer))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<PointCloudBuffer>(),
+        8usize,
+        concat!("Alignment of ", stringify!(PointCloudBuffer))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).buffer) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointCloudBuffer),
+            "::",
+            stringify!(buffer)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).float_num) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PointCloudBuffer),
+            "::",
+            stringify!(float_num)
+        )
+    );
+}
+pub type PointCloudBuffer_ptr = *mut PointCloudBuffer;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct pointcloud_pallet_detector_t {
+    pub handler: *mut ::std::os::raw::c_void,
+    #[doc = " crete ros node and subscriber and publisher from toml file\n \\param h\n \\param filename"]
+    pub create: ::std::option::Option<
+        unsafe extern "C" fn(
+            h: *mut pointcloud_pallet_detector_t,
+            filename: *const ::std::os::raw::c_char,
+            cfg: *const ta_cfg_t,
+        ) -> bool,
+    >,
+    #[doc = " close all resource\n \\param h"]
+    pub close: ::std::option::Option<unsafe extern "C" fn(h: *mut pointcloud_pallet_detector_t)>,
+    pub set_input: ::std::option::Option<
+        unsafe extern "C" fn(
+            h: *mut pointcloud_pallet_detector_t,
+            buffer: *mut f32_t,
+            height: u64_t,
+            width: u64_t,
+            vx: f32_t,
+            vy: f32_t,
+            vz: f32_t,
+        ),
+    >,
+    pub filter_ground: ::std::option::Option<
+        unsafe extern "C" fn(
+            h: *mut pointcloud_pallet_detector_t,
+            output_mode: u32_t,
+        ) -> PointCloudBuffer_ptr,
+    >,
+    pub set_ground_init_dim: ::std::option::Option<
+        unsafe extern "C" fn(
+            h: *mut pointcloud_pallet_detector_t,
+            height_min: u64_t,
+            height_max: u64_t,
+            width_min: u64_t,
+            width_max: u64_t,
+        ),
+    >,
+    pub set_ground_init_thresh: ::std::option::Option<
+        unsafe extern "C" fn(
+            h: *mut pointcloud_pallet_detector_t,
+            x_min: f32_t,
+            x_max: f32_t,
+            y_min: f32_t,
+            y_max: f32_t,
+            z_min: f32_t,
+            z_max: f32_t,
+            nz_min: f32_t,
+        ),
+    >,
+    pub set_ground_adaptive_thresh: ::std::option::Option<
+        unsafe extern "C" fn(
+            h: *mut pointcloud_pallet_detector_t,
+            x_min: f32_t,
+            x_max: f32_t,
+            y_min: f32_t,
+            y_max: f32_t,
+            z_min: f32_t,
+            z_max: f32_t,
+        ),
+    >,
+    pub filter_cargo: ::std::option::Option<
+        unsafe extern "C" fn(h: *mut pointcloud_pallet_detector_t) -> PointCloudBuffer_ptr,
+    >,
+    pub filter_pallet: ::std::option::Option<
+        unsafe extern "C" fn(h: *mut pointcloud_pallet_detector_t) -> PointCloudBuffer_ptr,
+    >,
+    pub find_pallet: ::std::option::Option<
+        unsafe extern "C" fn(h: *mut pointcloud_pallet_detector_t) -> PointCloudBuffer_ptr,
+    >,
+    pub compute_pallet:
+        ::std::option::Option<unsafe extern "C" fn(h: *mut pointcloud_pallet_detector_t)>,
+}
+#[test]
+fn bindgen_test_layout_pointcloud_pallet_detector_t() {
+    const UNINIT: ::std::mem::MaybeUninit<pointcloud_pallet_detector_t> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<pointcloud_pallet_detector_t>(),
+        96usize,
+        concat!("Size of: ", stringify!(pointcloud_pallet_detector_t))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<pointcloud_pallet_detector_t>(),
+        8usize,
+        concat!("Alignment of ", stringify!(pointcloud_pallet_detector_t))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).handler) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(handler)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).create) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(create)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).close) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(close)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).set_input) as usize - ptr as usize },
+        24usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(set_input)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).filter_ground) as usize - ptr as usize },
+        32usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(filter_ground)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).set_ground_init_dim) as usize - ptr as usize },
+        40usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(set_ground_init_dim)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).set_ground_init_thresh) as usize - ptr as usize },
+        48usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(set_ground_init_thresh)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).set_ground_adaptive_thresh) as usize - ptr as usize },
+        56usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(set_ground_adaptive_thresh)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).filter_cargo) as usize - ptr as usize },
+        64usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(filter_cargo)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).filter_pallet) as usize - ptr as usize },
+        72usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(filter_pallet)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).find_pallet) as usize - ptr as usize },
+        80usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(find_pallet)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).compute_pallet) as usize - ptr as usize },
+        88usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(compute_pallet)
+        )
+    );
+}
+pub type pointcloud_pallet_detector_t_ptr = *mut pointcloud_pallet_detector_t;
+extern "C" {
+    pub fn pointcloud_pallet_detector_create() -> pointcloud_pallet_detector_t;
 }

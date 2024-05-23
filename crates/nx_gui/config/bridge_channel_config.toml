@@ -1,0 +1,13 @@
+[bridge.bridge.rr]
+from = "ros"
+from_channel = "cloud_sub"
+to = "dds"
+to_channel = "cloud_pub"
+interval = 100.0
+
+
+[bridge]
+ros_dds_type = [
+    ["PointCloud2", "Message::Pointcloud1920x1080x3"],
+    ["PointCloud2","Message::Pointcloud640x480x3"]
+]

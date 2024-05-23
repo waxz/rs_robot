@@ -1,5 +1,5 @@
 use nx_message_center::base::common_message::shared::HeaderString;
-use nx_message_center::base::{common_message, message_handler, tcc, tiny_alloc};
+use nx_message_center::base::{common_message, message_handler, tcc, tiny_alloc,pointcloud_process};
 use std::ffi::CStr;
 use std::ops::Deref;
 use std::os::raw::c_void;
@@ -44,8 +44,13 @@ fn main()
         message_handler::MessageHandler::new("ros");
     let mut dds_handler: message_handler::MessageHandler =
         message_handler::MessageHandler::new("dds");
+
+    let mut detector_handler : pointcloud_process::perception::PointcloudPalletDetector
+        =pointcloud_process::perception::PointcloudPalletDetector::new() ;
+
     ros_handler.create("a.toml", *allocator.cfg.get());
     dds_handler.create("a.toml", *allocator.cfg.get());
+    detector_handler.create("a.toml", *allocator.cfg.get());
 
     let mut send_status = HeaderString::new(100, *allocator.cfg.get());
     send_status.set_data("hello");

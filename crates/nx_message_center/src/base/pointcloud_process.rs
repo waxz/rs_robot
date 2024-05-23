@@ -1,32 +1,223 @@
 pub mod perception
 {
-
-    pub fn se3_inverse(   tx: f32,
-                          ty: f32,
-                          tz: f32,
-                          roll: f32,
-                          pitch: f32,
-                          yaw: f32,
-                          itx : *mut f32,
-                          ity : *mut f32,
-                          itz : *mut f32,
-                          iroll : *mut f32,
-                          ipitch : *mut f32,
-                          iyaw : *mut f32,
+    use std::ffi::CString;
+    use std::ops::Deref;
+    use std::ptr::null_mut;
+    use nx_common::common::types::UnsafeMutexSender;
+    use crate::binding::{message_handler_t, pointcloud_pallet_detector_t, ta_cfg_t};
 
 
-    ) ->i32{
+    pub struct PointcloudPalletDetector{
+        handler: UnsafeMutexSender<pointcloud_pallet_detector_t>, //
+
+    }
+    impl PointcloudPalletDetector{
+        pub fn new()->Self{
+
+
+            let ptr = unsafe{
+                crate::binding::pointcloud_pallet_detector_create()
+            };
+
+            Self{
+                handler: UnsafeMutexSender::new(ptr),
+
+            }
+        }
+
+        pub fn create(&mut self, filename: &str, ta_cfg: ta_cfg_t) ->bool
+        {
+            let filename: CString = CString::new(filename).unwrap();
+
+            // let ptr = &mut self.handler.lock().unwrap().ptr;
+            let ptr = self.handler.get();
+
+            unsafe {
+                ptr.create.unwrap()(
+                    ptr.deref() as *const _ as *mut _,
+                    filename.as_ptr(),
+                    &ta_cfg,
+                )
+            }
+        }
+
+        pub fn set_ground_adaptive_thresh(&mut self,x_min:f32, x_max:f32, y_min:f32, y_max:f32, z_min:f32, z_max:f32){
+            let ptr = self.handler.get();
+
+            unsafe {
+
+
+                ptr.set_ground_adaptive_thresh.unwrap()(
+                    ptr.deref() as *const _ as *mut _,
+                    x_min, x_max, y_min, y_max, z_min, z_max
+                )
+            }
+        }
+        pub fn set_input(&mut self, buffer: *mut f32, height:u64, width:u64, vx:f32, vy:f32, vz:f32){
+            let ptr = self.handler.get();
+            unsafe{
+                ptr.set_input.unwrap()(ptr.deref() as *const _ as *mut _, buffer, height, width, vx, vy, vz)
+            }
+        }
+
+        pub fn set_ground_init_dim(&mut self, height_min:u64, height_max:u64, width_min:u64, width_max:u64){
+            let ptr = self.handler.get();
+
+            println!("set_ground_init_dim: {}, {}, {}, {} ",height_min, height_max, width_min,width_max);
+            unsafe {
+                ptr.set_ground_init_dim.unwrap()(ptr.deref() as *const _ as *mut _, height_min, height_max, width_min,width_max)
+            }
+        }
+
+        pub fn set_ground_init_thresh(&mut self, x_min:f32, x_max:f32, y_min:f32, y_max:f32, z_min:f32, z_max:f32, nz_min : f32){
+            let ptr = self.handler.get();
+            println!("set_ground_init_dim: {}, {}, {}, {}, {}, {} ",x_min, x_max, y_min, y_max, z_min, z_max);
+
+            unsafe {
+                ptr.set_ground_init_thresh.unwrap()(ptr.deref() as *const _ as *mut _, x_min, x_max, y_min, y_max, z_min, z_max,nz_min)
+            }
+
+        }
+
+        pub fn filter_ground(&mut self, output_mode: u32) ->(*mut f32, u64){
+
+            let ptr = self.handler.get();
+
+            let ret = unsafe{
+                ptr.filter_ground.unwrap()(
+                    ptr.deref() as *const _ as *mut _,
+                    output_mode
+                )
+            };
+
+            if ret.is_null(){
+                (null_mut(),0 as u64)
+
+            }else{
+                unsafe{
+                    ((*ret).buffer,(*ret).float_num)
+                }
+            }
+
+
+        }
+
+
+    }
+
+    impl Drop for PointcloudPalletDetector
+    {
+        fn drop(&mut self)
+        {
+            let counter = self.handler.strong_count();
+            println!("base handler reference counter: {}", counter);
+            if counter == 1 {
+                // let ptr = &mut self.handler.lock().unwrap().ptr;
+                let ptr = self.handler.get();
+
+                unsafe { ptr.close.unwrap()(ptr.deref() as *const _ as *mut _) };
+            }
+        }
+    }
+
+    pub struct CalibrationParam
+    {
+        pub index_buffer: *mut u64,
+        pub index_num: u64,
+        pub program: u64,
+        pub weight: f32,
+        pub target_tx: f32,
+        pub target_ty: f32,
+        pub target_tz: f32,
+        pub target_roll: f32,
+        pub target_pitch: f32,
+        pub target_yaw: f32,
+    }
+
+    pub fn pointcloud_calib(
+        src_buffer: *mut f32,
+        point_num: u64,
+
+        params: &Vec<CalibrationParam>,
+        tx: f32,
+        ty: f32,
+        tz: f32,
+        roll: f32,
+        pitch: f32,
+        yaw: f32,
+        itx: *mut f32,
+        ity: *mut f32,
+        itz: *mut f32,
+        iroll: *mut f32,
+        ipitch: *mut f32,
+        iyaw: *mut f32,
+    ) -> i32
+    {
+        let mut params: Vec<crate::binding::PointIndex> = params
+            .iter()
+            .map(|p| crate::binding::PointIndex {
+                src_buffer,
+                point_num,
+                index_buffer: p.index_buffer,
+                index_num: p.index_num,
+                program: p.program,
+                weight: p.weight,
+                target_tx: p.target_tx,
+                target_ty: p.target_ty,
+                target_tz: p.target_tz,
+                target_roll: p.target_roll,
+                target_pitch: p.target_pitch,
+                target_yaw: p.target_yaw,
+            })
+            .collect();
 
         unsafe {
-            crate::binding::se3_inverse( tx, ty, tz, roll, pitch, yaw, itx, ity, itz, iroll, ipitch, iyaw)
+            crate::binding::pointcloud_calib(
+                params.as_mut_ptr(),
+                params.len() as u64,
+                tx,
+                ty,
+                tz,
+                roll,
+                pitch,
+                yaw,
+                itx,
+                ity,
+                itz,
+                iroll,
+                ipitch,
+                iyaw,
+            )
         }
-}
+    }
+
+    pub fn se3_inverse(
+        tx: f32,
+        ty: f32,
+        tz: f32,
+        roll: f32,
+        pitch: f32,
+        yaw: f32,
+        itx: *mut f32,
+        ity: *mut f32,
+        itz: *mut f32,
+        iroll: *mut f32,
+        ipitch: *mut f32,
+        iyaw: *mut f32,
+    ) -> i32
+    {
+        unsafe {
+            crate::binding::se3_inverse(
+                tx, ty, tz, roll, pitch, yaw, itx, ity, itz, iroll, ipitch, iyaw,
+            )
+        }
+    }
 
     pub fn pointcloud_norm(
         src_buffer: *mut f32,
         point_num: u64,
         index_buffer: *mut u64,
-        index_num : u64,
+        index_num: u64,
         vx: f32,
         vy: f32,
         vz: f32,
@@ -37,9 +228,25 @@ pub mod perception
         ny: *mut f32,
         nz: *mut f32,
         nd: *mut f32,
-    )->i32{
+    ) -> i32
+    {
         unsafe {
-            crate::binding::pointcloud_norm(src_buffer, point_num, index_buffer, index_num, vx, vy, vz, cx, cy, cz, nx , ny, nz, nd)
+            crate::binding::pointcloud_norm(
+                src_buffer,
+                point_num,
+                index_buffer,
+                index_num,
+                vx,
+                vy,
+                vz,
+                cx,
+                cy,
+                cz,
+                nx,
+                ny,
+                nz,
+                nd,
+            )
         }
     }
 

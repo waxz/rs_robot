@@ -1,0 +1,101 @@
+
+
+[dds.participant]
+xml = "/home/waxz/RustroverProjects/rust_practice/crates/nx_gui/config/gui_config.xml"
+profile = "participant_discovery_protocol_SIMPLE"
+name = "dds_test_1"
+#interface_allowlist = []
+#interface_blocklist = []
+interface_allowlist = ["lo"]
+interface_blocklist = ["eno1", "enx00e04d71ffe7", "wlp4s0", "wlp3s0", "docker0", "wt0"]
+
+[dds.readers.cloud_sub]
+topic_name = "cloud"
+topic_type = "Message::Pointcloud640x480x3"
+sub_profile = ""
+topic_profile = ""
+reader_profile = "shm_reader_profile"
+qos_queue_size = 2
+
+#[dds.writers.cloud_pub]
+#topic_name = "cloud2"
+#topic_type = "Message::Pointcloud1920x1080x3"
+#pub_profile = ""
+#topic_profile = ""
+#writer_profile = ""
+#qos_queue_size = 1
+
+[dds.writers]
+
+
+# 1.57079632679489661923132169163975144
+#3.14159265358979323846264338327950288
+[pallet_detector.extrinsic.pose]
+tx = 0.4000000059604645
+ty = 0.01
+tz = 0.6586700081825256
+roll = -1.5707963705062866
+pitch = 0.0
+yaw = 1.5707963705062866
+
+[pallet_detector.extrinsic]
+enable = true
+
+[pallet_detector.cloud.dim]
+height = 480
+width = 640
+[pallet_detector.cloud.filter]
+
+enable_dim = true
+filter_height_min = 330
+filter_height_max = 440
+filter_width_min = 110
+filter_width_max = 530
+
+enable_range = false
+filter_x_min = -5.0
+filter_x_max = -1.0
+filter_y_min = -1.5
+filter_y_max = 1.5
+filter_z_min = -0.2
+filter_z_max = 1.0
+
+[pallet_detector.filter_ground]
+init_valid_num_min = 100
+output_mode = 0
+#// initial ground region
+init_ground_height_min = 80
+init_ground_height_max = 130
+init_ground_width_min = 150
+init_ground_width_max = 320
+
+
+#// check initial ground is ground
+init_ground_cx_min = -1.899999976158142
+init_ground_cx_max = -1.100000023841858
+init_ground_cy_min = -0.5
+init_ground_cy_max = 0.5
+init_ground_cz_min = -0.05000000074505806
+init_ground_cz_max = 0.05000000074505806
+
+
+
+#// ground region grow to intersect vertical region
+init_ground_nz_min = 0.9
+
+#// search region
+ray_height_min = 0
+ray_height_max = 0
+ray_width_min = 0
+ray_width_max = 0
+#// detect vertical plane, pallet or cargo or wall, or outlier shadow
+scan_width_step = 0
+#// find stable center[cx,cy,cz],reject outlier
+#// adaptive thresh
+
+adaptive_x_min = -0.02
+adaptive_x_max = 0.02
+adaptive_y_min = -0.02
+adaptive_y_max = 0.02
+adaptive_z_min = -0.05
+adaptive_z_max = 0.01

@@ -1,6 +1,6 @@
 use nx_common::common::signal_handler::SignalHandler;
 use nx_common::common::thread::Thread;
-use nx_message_center::base::{common_message, message_handler, tiny_alloc};
+use nx_message_center::base::{common_message, message_handler, tiny_alloc,pointcloud_process};
 
 use nx_common::common::math::Point3f;
 
@@ -11,9 +11,9 @@ use nx_message_center::base::common_message::shared::PointCloud2;
 use std::f32::consts::{PI, TAU};
 use std::f64::consts::FRAC_PI_2;
 use std::ffi::c_void;
+use std::io::Write;
 use std::ops::{BitAnd, Deref};
 use std::{fs, slice};
-use std::io::Write;
 use time::{OffsetDateTime, UtcOffset};
 
 use bevy::app::{App, Startup, Update};
@@ -27,12 +27,11 @@ use bevy_egui::egui::{ComboBox, ScrollArea, Slider};
 use bevy_egui::{egui, EguiContexts};
 use bevy_mod_raycast::CursorRay;
 
-
+use bevy::DefaultPlugins;
 use rand::{thread_rng, Rng};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, MutexGuard};
-use bevy::DefaultPlugins;
 // argument
 use clap::Parser;
 use nx_gui::app_builder::{create_bevy_app, CameraFocusRay};
@@ -60,6 +59,18 @@ struct Args
 }
 
 //------------------
+
+#[derive(Copy, Clone)]
+struct DetectionOperator{
+
+    // 0: do nothing
+    // 1: filter ground
+    // 2: 1 + filter cargo
+    pub enable : bool,
+    pub detection_operator_mode: u32,
+    pub detection_operator_ret : u32,
+    pub filter_ground:GroundFilter,
+}
 struct SimpleState
 {
     pub enable_dds_update: bool,
@@ -77,16 +88,19 @@ struct SimpleState
 
     pub vertex_color_hsv_ratio: f32,
 
-    pub exit: bool,
+    // pub exit: bool,
 
     pub two_cluster_distance_index: [usize; 2],
     pub filter: CloudFilterConfig,
-    pub operator_mode : u32,
-    pub operator_run : bool,
+    pub operator_mode: u32,
+    pub operator_run: bool,
+    pub calibration_enable :bool,
+
+    pub detection_operator : DetectionOperator,
+
 }
 
-
-#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 struct Pose
 {
     tx: f32,
@@ -97,13 +111,13 @@ struct Pose
     yaw: f32,
 }
 
-#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
-struct CloudDimConfig{
-    height:usize,
-    width:usize,
-
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+struct CloudDimConfig
+{
+    height: usize,
+    width: usize,
 }
-#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 struct CloudFilterConfig
 {
     enable_dim: Option<bool>,
@@ -119,40 +133,92 @@ struct CloudFilterConfig
     filter_x_max: f32,
     filter_y_max: f32,
     filter_z_max: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+struct GroundFilter{
+    output_mode:u32,
+
+    // initial ground region
+    init_ground_height_min : u64,
+    init_ground_height_max : u64,
+    init_ground_width_min : u64,
+    init_ground_width_max : u64,
+
+    // check initial ground is ground
+    init_ground_cx_min: f32,
+    init_ground_cx_max: f32,
+    init_ground_cy_min: f32,
+    init_ground_cy_max: f32,
+    init_ground_cz_min: f32,
+    init_ground_cz_max: f32,
+
+    // ground region grow to intersect vertical region
+
+    init_ground_nz_min: f32,
+
+    // search region
+    ray_height_min : u64,
+    ray_height_max : u64,
+    ray_width_min : u64,
+    ray_width_max : u64,
+
+
+    // detect vertical plane, pallet or cargo or wall, or outlier shadow
+    scan_width_step : u64,
+    // find stable center[cx,cy,cz],reject outlier
+
+    // adaptive thresh
+    adaptive_x_min: f32,
+    adaptive_x_max: f32,
+    adaptive_y_min: f32,
+    adaptive_y_max: f32,
+    adaptive_z_min: f32,
+    adaptive_z_max: f32,
 
 }
 
-#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 struct CloudConfig
 {
-    dim:CloudDimConfig,
-    filter:CloudFilterConfig,
+    dim: CloudDimConfig,
+    filter: CloudFilterConfig,
 }
-#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
-struct GuiConfig{
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+struct GuiConfig
+{
     extrinsic: PoseMarker,
     cloud: CloudConfig,
-
+    filter_ground: GroundFilter,
 }
-#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
-struct AppConfig{
-    gui: GuiConfig,
-
-}
-
-#[derive(Debug, Serialize ,Deserialize, Copy, Clone)]
-struct PoseMarker
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+struct AppConfig
 {
-    pose: Pose,
-    enable: bool,
+    pallet_detector: GuiConfig,
 }
 
-struct CloudFloatVecBuffer{
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+pub struct PoseMarker
+{
+    pub pose: Pose,
+    pub enable: bool,
+}
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+struct CalibrationSelect
+{
+    enable: bool,
+    from_index: u64,
+    to_index: u64,
+    program: u64,
+    weight: f32,
+}
+
+struct CloudFloatVecBuffer
+{
     raw_buffer: UnsafeSender<*const f32>,
     transform_buffer: UnsafeSender<*const f32>,
     render_buffer: UnsafeSender<*const f32>,
-    float_num : usize,
-
+    float_num: usize,
 }
 struct StaticSharedData
 {
@@ -168,7 +234,8 @@ struct StaticSharedData
     // multiple pick group 3
     pub tool_selected_points_index: Arc<Mutex<Vec<Vec<u64>>>>,
     pub marker_pose: Arc<Mutex<Vec<PoseMarker>>>,
-    pub extrinsic: Arc<Mutex<PoseMarker>>
+    pub extrinsic: Arc<Mutex<PoseMarker>>,
+    pub calib_select: Arc<Mutex<Vec<CalibrationSelect>>>,
 }
 
 static GLOBAL_DATA: OnceLock<StaticSharedData> = OnceLock::new();
@@ -184,9 +251,9 @@ fn main()
 
     println!("what's up");
     let args = Args::parse();
-    let config_file = & args.dds_config;
+    let config_file = &args.dds_config;
 
-    println!("load toml file : {:?}",config_file);
+    println!("load toml file : {:?}", config_file);
 
     let contents = match fs::read_to_string(config_file) {
         // If successful return the files text as `contents`.
@@ -200,7 +267,7 @@ fn main()
             return;
         }
     };
-    println!("contents:\n{:?}",contents);
+    println!("contents:\n{:?}", contents);
 
     let mut app_config: AppConfig; // = toml::from_str(&contents).unwrap();
 
@@ -212,11 +279,12 @@ fn main()
         }
     }
 
-    let cloud_dim = app_config.gui.cloud.dim;
+    let cloud_dim = app_config.pallet_detector.cloud.dim;
 
-
-    let mut raw_float_vec = allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
-    let mut transform_float_vec = allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+    let mut raw_float_vec =
+        allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+    let mut transform_float_vec =
+        allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
 
     {
         let raw_float_vec_ptr = raw_float_vec.as_ptr();
@@ -228,13 +296,12 @@ fn main()
             StaticSharedData {
                 cloud_dim: [cloud_dim.height, cloud_dim.width],
 
-                cloud_buffer: Arc::new(Mutex::new(crate::CloudFloatVecBuffer{
+                cloud_buffer: Arc::new(Mutex::new(crate::CloudFloatVecBuffer {
                     raw_buffer: UnsafeSender::new(raw_float_vec_ptr),
                     transform_buffer: UnsafeSender::new(transform_float_vec_ptr),
                     render_buffer: UnsafeSender::new(raw_float_vec_ptr),
                     float_num: raw_float_vec_len,
-                }
-                )),
+                })),
                 tool_selected_points_index: Arc::new(Mutex::new(vec![])),
                 state: Arc::new(Mutex::new(SimpleState {
                     enable_dds_update: true,
@@ -248,27 +315,22 @@ fn main()
                     reset_vertex: false,
                     add_selected_to_vec: false,
                     vertex_color_hsv_ratio: 5.0,
-                    exit: false,
+                    // exit: false,
                     two_cluster_distance_index: [0; 2],
-                    filter: CloudFilterConfig {
-                        enable_dim: Some(false),
-                        filter_height_min: 0,
-                        filter_height_max: 0,
-                        filter_width_min: 0,
-                        filter_width_max: 0,
-                        enable_range: Some(false),
-                        filter_x_min: 0.0,
-                        filter_y_min: 0.0,
-                        filter_z_min: 0.0,
-                        filter_x_max: 0.0,
-                        filter_y_max: 0.0,
-                        filter_z_max: 0.0,
-                    },
+                    filter:  app_config.pallet_detector.cloud.filter,
                     operator_mode: 0,
                     operator_run: false,
+                    calibration_enable: false,
+                    detection_operator: DetectionOperator{
+                        detection_operator_mode: 0,
+                        enable: false,
+                        filter_ground: app_config.pallet_detector.filter_ground,
+                        detection_operator_ret: 0,
+                    },
                 })),
                 marker_pose: Arc::new(Mutex::new(vec![])),
-                extrinsic: Arc::new(Mutex::new(app_config.gui.extrinsic)),
+                extrinsic: Arc::new(Mutex::new(app_config.pallet_detector.extrinsic)),
+                calib_select: Arc::new(Mutex::new(vec![])),
             }
         });
 
@@ -278,7 +340,19 @@ fn main()
 
     let mut dds_handler: message_handler::MessageHandler =
         message_handler::MessageHandler::new("dds");
-    dds_handler.create(args.dds_config.as_str(), *allocator.cfg.get());
+    let ok = dds_handler.create(args.dds_config.as_str(), *allocator.cfg.get());
+
+    if !ok{
+        println!("exit");
+        return;
+    }
+    let mut pallet_detector_handler = pointcloud_process::perception::PointcloudPalletDetector::new();
+    let ok = pallet_detector_handler.create(args.dds_config.as_str(), *allocator.cfg.get());
+
+    if !ok{
+        println!("exit");
+        return;
+    }
 
     let mut signal = SignalHandler::default();
 
@@ -292,8 +366,6 @@ fn main()
     app.add_systems(Update, raycast_picker);
     app.add_systems(Startup, setup_help_info);
     app.add_systems(Update, plot_marker);
-
-
 
     let mut dds_thread = Thread::default();
 
@@ -315,6 +387,7 @@ fn main()
                     .lock()
                     .unwrap()
                     .dds_msg_count;
+                let mut cloud_height_width = [0,0];
 
                 if enable_dds_update || dds_msg_count == 0 {
                     let recv_cloud = dds_handler.read_data(c"cloud_sub");
@@ -338,7 +411,7 @@ fn main()
                         let frame_id = data.get_frame_id();
                         let cloud_float_vec = data.get_data();
 
-                        let cloud_height_width = data.get_height_width();
+                        cloud_height_width = data.get_height_width();
 
                         println!(
                             "recv data [{:?}] at {:?},cloud_float_vec.len : {}",
@@ -356,9 +429,10 @@ fn main()
                                 * 3;
                             raw_float_vec = allocator
                                 .realloc_as_array::<f32>(raw_float_vec, float_vec_len as usize);
-                            transform_float_vec = allocator
-                                .realloc_as_array::<f32>(transform_float_vec, float_vec_len as usize);
-
+                            transform_float_vec = allocator.realloc_as_array::<f32>(
+                                transform_float_vec,
+                                float_vec_len as usize,
+                            );
 
                             info!("clip cloud to float_vec_len {} ", float_vec_len);
                             // use nx_message_center::base::pointcloud_process::perception::pointcloud_clip;
@@ -374,20 +448,24 @@ fn main()
                             );
 
                             {
-                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() = CloudFloatVecBuffer{
-                                    raw_buffer:  UnsafeSender::new(raw_float_vec.as_ptr()),
-                                    transform_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
-                                    render_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
-                                    float_num: raw_float_vec.len(),
-                                };
+                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
+                                    CloudFloatVecBuffer {
+                                        raw_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
+                                        transform_buffer: UnsafeSender::new(
+                                            transform_float_vec.as_ptr(),
+                                        ),
+                                        render_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
+                                        float_num: raw_float_vec.len(),
+                                    };
                             }
                         } else {
-                            raw_float_vec =
-                                allocator.realloc_as_array::<f32>(raw_float_vec, cloud_float_vec.len());
+                            raw_float_vec = allocator
+                                .realloc_as_array::<f32>(raw_float_vec, cloud_float_vec.len());
 
-                            transform_float_vec =
-                                allocator.realloc_as_array::<f32>(transform_float_vec, cloud_float_vec.len());
-
+                            transform_float_vec = allocator.realloc_as_array::<f32>(
+                                transform_float_vec,
+                                cloud_float_vec.len(),
+                            );
 
                             unsafe {
                                 std::ptr::copy(
@@ -398,18 +476,18 @@ fn main()
                             }
 
                             {
-
-                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() = CloudFloatVecBuffer{
-                                    raw_buffer:  UnsafeSender::new(raw_float_vec.as_ptr()),
-                                    transform_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
-                                    render_buffer:UnsafeSender::new(raw_float_vec.as_ptr()),
-                                    float_num: raw_float_vec.len(),
-                                };
+                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
+                                    CloudFloatVecBuffer {
+                                        raw_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
+                                        transform_buffer: UnsafeSender::new(
+                                            transform_float_vec.as_ptr(),
+                                        ),
+                                        render_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
+                                        float_num: raw_float_vec.len(),
+                                    };
                             }
                         }
                     }
-
-
                 }
                 GLOBAL_DATA
                     .get()
@@ -421,47 +499,181 @@ fn main()
 
                 let extrinsic = *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
 
-                if (dds_msg_count > 0 && extrinsic.enable ){
-                    {
+                {
+                    if dds_msg_count > 0 {
+                        if let Ok(ref mut mutex) =
+                            GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
+                        {
+                            let CloudFloatVecBuffer {
+                                raw_buffer,
+                                transform_buffer,
+                                render_buffer,
+                                float_num,
+                            } = **mutex;
+                            pointcloud_transform(
+                                *raw_buffer.get() as *mut _,
+                                (float_num as u64) / 3,
+                                *transform_buffer.get() as *mut _,
+                                extrinsic.pose.tx,
+                                extrinsic.pose.ty,
+                                extrinsic.pose.tz,
+                                extrinsic.pose.roll,
+                                extrinsic.pose.pitch,
+                                extrinsic.pose.yaw,
+                            );
+                        }
+                    }
+                }
+                if (dds_msg_count > 0 && extrinsic.enable) {
 
 
-                        if let Ok(ref mut mutex) =  GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock(){
-                               let CloudFloatVecBuffer{raw_buffer, transform_buffer, render_buffer, float_num}  = **mutex;
-                               pointcloud_transform(
-                                   *raw_buffer.get() as *mut _,
-                                   (float_num as u64)/3 ,
-                                   *transform_buffer.get() as *mut _,
-                                   extrinsic.pose.tx,
-                                   extrinsic.pose.ty,
-                                   extrinsic.pose.tz,
-                                   extrinsic.pose.roll,
-                                   extrinsic.pose.pitch,
-                                   extrinsic.pose.yaw,
-                               );
-                           }
+                    let transform_buffer = GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .cloud_buffer
+                        .lock()
+                        .unwrap()
+                        .transform_buffer;
 
+                    GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .cloud_buffer
+                        .lock()
+                        .unwrap()
+                        .render_buffer = transform_buffer;
+                    info!("render_buffer=transform_buffer extrinsic: {:?}", extrinsic);
+                } else {
+                    let raw_buffer = GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .cloud_buffer
+                        .lock()
+                        .unwrap()
+                        .raw_buffer;
+                    GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .cloud_buffer
+                        .lock()
+                        .unwrap()
+                        .render_buffer = raw_buffer;
+                    info!("render_buffer=raw_buffer")
+                }
+
+                if dds_msg_count > 0{
+
+                    let mut detection_operator = GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator;
+                    let filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
+
+                    let [cloud_height, cloud_width] = if filter.enable_dim.unwrap(){
+                        [(filter.filter_height_max
+                            - filter.filter_height_min)
+                            ,  (filter.filter_width_max - filter.filter_width_min)]
+                    }else{
+                        [cloud_height_width[0] as u64, cloud_height_width[1] as u64]
+                    };
+                    let [vx, vy,vz] = if extrinsic.enable{
+                        [extrinsic.pose.tx,
+                            extrinsic.pose.ty,
+                            extrinsic.pose.tz]
+                    }else{
+                        [0.0,0.0,0.0]
+                    };
+
+                    let transform_buffer = GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .cloud_buffer
+                        .lock()
+                        .unwrap()
+                        .transform_buffer;
+
+                    if detection_operator.enable{
+
+                        // set input
+                        pallet_detector_handler.set_input(*transform_buffer.get() as *mut _,cloud_height,cloud_width, vx, vy, vz );
+
+                        // set ground init dim
+                        pallet_detector_handler.set_ground_init_thresh( detection_operator.filter_ground.init_ground_cx_min,detection_operator.filter_ground.init_ground_cx_max,
+                                                                        detection_operator.filter_ground.init_ground_cy_min,detection_operator.filter_ground.init_ground_cy_max,
+                                                                        detection_operator.filter_ground.init_ground_cz_min,detection_operator.filter_ground.init_ground_cz_max,
+                                                                        detection_operator.filter_ground.init_ground_nz_min
+
+                        );
+                        pallet_detector_handler.set_ground_adaptive_thresh(
+                            detection_operator.filter_ground.adaptive_x_min, detection_operator.filter_ground.adaptive_x_max,
+                            detection_operator.filter_ground.adaptive_y_min, detection_operator.filter_ground.adaptive_y_max,
+                            detection_operator.filter_ground.adaptive_z_min, detection_operator.filter_ground.adaptive_z_max,
+
+                        );
+
+                        pallet_detector_handler.set_ground_init_dim(detection_operator.filter_ground.init_ground_height_min,detection_operator.filter_ground.init_ground_height_max,
+                                                                    detection_operator.filter_ground.init_ground_width_min,detection_operator.filter_ground.init_ground_width_max);
+                        // call filter
+
+                        let ret ;
+
+
+                        if detection_operator.detection_operator_mode == 1{
+                            println!("detection_operator.filter_ground : {:?}",detection_operator.filter_ground);
+
+
+
+                            if let Ok(ref mut mutex) =
+                                GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
+                            {
+                                let CloudFloatVecBuffer {
+                                    raw_buffer,
+                                    transform_buffer,
+                                    ref mut render_buffer,
+                                    ref mut float_num,
+                                } = **mutex;
+
+                                ret = pallet_detector_handler.filter_ground(detection_operator.filter_ground.output_mode );
+                                let (process_buffer,  process_float_num) = ret;
+
+                                if ! process_buffer.is_null() && process_float_num > 0 {
+
+                                     *render_buffer = UnsafeSender::new(process_buffer);
+
+                                     *float_num = process_float_num as usize;
+                                    println!("set cloud_buffer render_buffer to process_buffer ");
+
+
+                                }
+                            }
+
+
+
+
+
+                        }
+
+
+
+                        match detection_operator.detection_operator_mode {
+                            0 => {
+
+
+                            },
+                            _ =>{
+
+                            }
+                        }
 
                     }
-
-                    let transform_buffer = GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().transform_buffer;
-
-                    GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().render_buffer = transform_buffer;
-                    info!("render_buffer=transform_buffer extrinsic: {:?}",extrinsic);
-                }else{
-
-                    let raw_buffer = GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().raw_buffer;
-                    GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().render_buffer = raw_buffer;
-                    info!("render_buffer=raw_buffer")
+                    GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator = detection_operator;
 
                 }
 
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
 
-            GLOBAL_DATA.get().unwrap().state.lock().unwrap().exit = true;
-            if GLOBAL_DATA.get().unwrap().state.lock().unwrap().exit {
-                info!("send exit signal");
-            }
+            // GLOBAL_DATA.get().unwrap().state.lock().unwrap().exit = true;
+            // if GLOBAL_DATA.get().unwrap().state.lock().unwrap().exit {
+            //     info!("send exit signal");
+            // }
         });
     }
 
@@ -469,8 +681,10 @@ fn main()
 
     signal.stop();
 
-    app_config.gui.extrinsic = *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
-    app_config.gui.cloud.filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
+    app_config.pallet_detector.extrinsic = *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
+    app_config.pallet_detector.cloud.filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
+
+    app_config.pallet_detector.filter_ground =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator.filter_ground;
 
     let output_filename = "/tmp/gui_output.toml";
 
@@ -478,12 +692,15 @@ fn main()
         .write(true)
         .create(true)
         .truncate(true)
-        .open(output_filename).unwrap();
+        .open(output_filename)
+        .unwrap();
 
-    let toml_data  = toml::to_string(&app_config).unwrap();
+    let toml_data = toml::to_string(&app_config).unwrap();
     file.write_all(&toml_data.to_string().as_bytes());
-    println!("app_config data : \n{} \noutput to : {}",toml_data, output_filename);
-
+    println!(
+        "app_config data : \n{} \noutput to : {}",
+        toml_data, output_filename
+    );
 }
 
 fn setup_help_info(mut commands: Commands)
@@ -607,23 +824,25 @@ fn update_shader_render_demo(
     {
         if let Some(buffer) = GLOBAL_DATA.get() {
             if let Ok(ref mut mutex) = buffer.cloud_buffer.try_lock() {
-                let CloudFloatVecBuffer{raw_buffer, transform_buffer, render_buffer, float_num} = **mutex;
+                let CloudFloatVecBuffer {
+                    raw_buffer,
+                    transform_buffer,
+                    render_buffer,
+                    float_num,
+                } = **mutex;
 
-
-
-                let vec3_data: &[[f32; 3]] =
-                    unsafe { slice::from_raw_parts_mut(*render_buffer.get() as *mut [f32; 3], float_num / 3) };
+                let vec3_data: &[[f32; 3]] = unsafe {
+                    slice::from_raw_parts_mut(*render_buffer.get() as *mut [f32; 3], float_num / 3)
+                };
                 let vec3_data_len = vec3_data.len();
-
-                config.dynamic_point_num = vec3_data_len;
 
                 for (_, mut data) in query.iter_mut().enumerate() {
                     let mut data = &mut data.0;
                     let data_len = data.len();
-                    println!(
-                        "update cloud scale, vec3_data_len {:?}, data_len {:?}",
-                        vec3_data_len, data_len
-                    );
+                    // println!(
+                    //     "update cloud scale, vec3_data_len {:?}, data_len {:?}",
+                    //     vec3_data_len, data_len
+                    // );
 
                     if vec3_data_len > data_len {
                         warn!(
@@ -632,6 +851,8 @@ fn update_shader_render_demo(
                         );
                         return;
                     }
+                    config.dynamic_point_num = vec3_data_len;
+
                     for i in 0..vec3_data_len {
                         let a = vec3_data[i];
                         let b = &mut data[i];
@@ -695,7 +916,9 @@ fn update_shader_render_demo(
                                 .iter()
                                 .enumerate()
                                 .take(vec3_data_len)
-                                .filter_map(|(i, b)| if b.selected > 0 { Some(i as u64) } else { None })
+                                .filter_map(
+                                    |(i, b)| if b.selected > 0 { Some(i as u64) } else { None },
+                                )
                                 .collect();
 
                             // let index_vec:Vec<_> = data.iter().enumerate().take_while(|(i,b)|{b.selected > 0}).map(|(i,b)| i).collect();
@@ -735,10 +958,13 @@ fn raycast_picker(
     key_input: Res<ButtonInput<KeyCode>>,
     mut camera_ray: ResMut<CameraFocusRay>,
     mut config: ResMut<ShaderResConfig>,
-
 )
 {
     // start select
+    let vec3_len = config.dynamic_point_num;
+    if vec3_len == 0 {
+        return;
+    }
 
     let start_select = GLOBAL_DATA
         .get()
@@ -794,7 +1020,6 @@ fn raycast_picker(
                     let mut data = &mut data.0;
 
                     // let vec3_len = GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().float_num;
-                    let vec3_len = config.dynamic_point_num;
 
                     for i in 0..vec3_len {
                         let v = &mut data[i];
@@ -833,12 +1058,8 @@ fn plot_marker(mut gizmos: Gizmos)
                 rect_len, -rect_len,
             ];
 
-            let mut axis =  [
-                axis_len, 0.0, 0.0,
-                0.0, rect_len, 0.0,
-                0.0, 0.0, rect_len,
-            ];;
-            let mut axis_abs = [0.0f32;9];
+            let mut axis = [axis_len, 0.0, 0.0, 0.0, rect_len, 0.0, 0.0, 0.0, rect_len];
+            let mut axis_abs = [0.0f32; 9];
 
             let mut plain_points_abs = [0.0; 12];
             pointcloud_transform(
@@ -875,22 +1096,33 @@ fn plot_marker(mut gizmos: Gizmos)
                 marker.pose.yaw,
             );
 
-            gizmos.ray(Vec3 {
-                x: marker.pose.tx,
-                y: marker.pose.ty,
-                z: marker.pose.tz,
-            }, Vec3::new(axis_abs[0],axis_abs[1],axis_abs[2]), Color::RED);
-            gizmos.ray(Vec3 {
-                x: marker.pose.tx,
-                y: marker.pose.ty,
-                z: marker.pose.tz,
-            }, Vec3::new(axis_abs[3],axis_abs[4],axis_abs[5]), Color::GREEN);
-            gizmos.ray(Vec3 {
-                x: marker.pose.tx,
-                y: marker.pose.ty,
-                z: marker.pose.tz,
-            }, Vec3::new(axis_abs[6],axis_abs[7],axis_abs[8]), Color::BLUE);
-
+            gizmos.ray(
+                Vec3 {
+                    x: marker.pose.tx,
+                    y: marker.pose.ty,
+                    z: marker.pose.tz,
+                },
+                Vec3::new(axis_abs[0], axis_abs[1], axis_abs[2]),
+                Color::RED,
+            );
+            gizmos.ray(
+                Vec3 {
+                    x: marker.pose.tx,
+                    y: marker.pose.ty,
+                    z: marker.pose.tz,
+                },
+                Vec3::new(axis_abs[3], axis_abs[4], axis_abs[5]),
+                Color::GREEN,
+            );
+            gizmos.ray(
+                Vec3 {
+                    x: marker.pose.tx,
+                    y: marker.pose.ty,
+                    z: marker.pose.tz,
+                },
+                Vec3::new(axis_abs[6], axis_abs[7], axis_abs[8]),
+                Color::BLUE,
+            );
 
             let [qw, qx, qy, qz] = nx_common::common::transform2d::euler_to_quaternion(
                 marker.pose.roll as f64,
@@ -956,9 +1188,7 @@ fn plot_marker(mut gizmos: Gizmos)
     }
 }
 
-fn create_egui_windows(mut contexts: EguiContexts,
-                       mut gizmos: Gizmos
-)
+fn create_egui_windows(mut contexts: EguiContexts, mut gizmos: Gizmos)
 {
     let ctx = contexts.ctx_mut();
     // Get current context style
@@ -969,12 +1199,14 @@ fn create_egui_windows(mut contexts: EguiContexts,
     // Mutate global style with above changes
     ctx.set_style(style);
 
-    egui::Window::new("Selector").resizable(true).show(ctx, |ui| {
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-
-                ui.collapsing("Instructions", |ui| {
-                    ui.label(r##"
+    egui::Window::new("Selector")
+        .resizable(true)
+        .show(ctx, |ui| {
+            ui.group(|ui| {
+                ui.vertical(|ui| {
+                    ui.collapsing("Instructions", |ui| {
+                        ui.label(
+                            r##"
 Esc : quit
 KeyControl + KeyT : toogle camera orbit control
 KeyControl + MouseButtonLeft : rotate camera
@@ -985,197 +1217,198 @@ Press KeyControl + KeyShift, move mouse to select points.
 Only points within tool_ray_radius can be selected.
 Click Add to save indexes.
 Click Reser to clear current indexes.
-                    "##);
-                });
+                    "##,
+                        );
+                    });
 
-                ui.horizontal(|ui| {
-                    let mut start_select = GLOBAL_DATA
+                    ui.horizontal(|ui| {
+                        let mut start_select = GLOBAL_DATA
+                            .get()
+                            .unwrap()
+                            .state
+                            .lock()
+                            .unwrap()
+                            .start_select;
+                        ui.checkbox(&mut start_select, "Enable");
+                        GLOBAL_DATA
+                            .get()
+                            .unwrap()
+                            .state
+                            .lock()
+                            .unwrap()
+                            .start_select = start_select;
+                        if (start_select) {
+                            GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .state
+                                .lock()
+                                .unwrap()
+                                .enable_dds_update = false;
+                        }
+
+                        if ui.button("Reset").clicked() {
+                            GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .state
+                                .lock()
+                                .unwrap()
+                                .reset_vertex = true;
+                        }
+
+                        if ui.button("Add").clicked() {
+                            GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .state
+                                .lock()
+                                .unwrap()
+                                .add_selected_to_vec = true;
+                            info!("Add is clicked");
+                        }
+                    });
+
+                    let mut vertex_color_hsv_ratio = GLOBAL_DATA
                         .get()
                         .unwrap()
                         .state
                         .lock()
                         .unwrap()
-                        .start_select;
-                    ui.checkbox(&mut start_select, "Enable");
+                        .vertex_color_hsv_ratio;
+                    ui.add(
+                        egui::DragValue::new(&mut vertex_color_hsv_ratio)
+                            .speed(0.1)
+                            .clamp_range(1.0..=15.0)
+                            .prefix("vertex_color_hsv_ratio: "),
+                    );
                     GLOBAL_DATA
                         .get()
                         .unwrap()
                         .state
                         .lock()
                         .unwrap()
-                        .start_select = start_select;
-                    if (start_select) {
-                        GLOBAL_DATA
-                            .get()
-                            .unwrap()
-                            .state
-                            .lock()
-                            .unwrap()
-                            .enable_dds_update = false;
-                    }
+                        .vertex_color_hsv_ratio = vertex_color_hsv_ratio;
 
-                    if ui.button("Reset").clicked() {
-                        GLOBAL_DATA
-                            .get()
-                            .unwrap()
-                            .state
-                            .lock()
-                            .unwrap()
-                            .reset_vertex = true;
-                    }
+                    //=====
+                    let mut point_default_scale = GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .point_default_scale;
+                    ui.add(
+                        egui::DragValue::new(&mut point_default_scale)
+                            .speed(0.001)
+                            .clamp_range(0.001..=0.2)
+                            .prefix("scale_default: "),
+                    );
+                    GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .point_default_scale = point_default_scale;
 
-                    if ui.button("Add").clicked() {
-                        GLOBAL_DATA
-                            .get()
-                            .unwrap()
-                            .state
-                            .lock()
-                            .unwrap()
-                            .add_selected_to_vec = true;
-                        info!("Add is clicked");
-                    }
+                    //====
+                    //=====
+                    let mut point_highlight_selected_scale = GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .point_highlight_selected_scale;
+                    ui.add(
+                        egui::DragValue::new(&mut point_highlight_selected_scale)
+                            .speed(0.001)
+                            .clamp_range(0.001..=0.2)
+                            .prefix("scale_select: "),
+                    );
+                    GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .point_highlight_selected_scale = point_highlight_selected_scale;
+
+                    //====
+                    //=====
+                    let mut point_highlight_unselected_scale = GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .point_highlight_unselected_scale;
+                    ui.add(
+                        egui::DragValue::new(&mut point_highlight_unselected_scale)
+                            .speed(0.001)
+                            .clamp_range(0.001..=0.2)
+                            .prefix("scale_unselect: "),
+                    );
+                    GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .point_highlight_unselected_scale = point_highlight_unselected_scale;
+
+                    //====
+                    let mut tool_ray_radius = GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .tool_ray_radius;
+                    ui.add(
+                        egui::DragValue::new(&mut tool_ray_radius)
+                            .speed(0.001)
+                            .clamp_range(0.001..=0.1)
+                            .prefix("tool_ray_radius: "),
+                    );
+                    GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .tool_ray_radius = tool_ray_radius;
+
+                    //==tool_ray_distance
+                    let mut tool_ray_distance = GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .tool_ray_distance;
+                    ui.add(
+                        egui::DragValue::new(&mut tool_ray_distance)
+                            .speed(0.001)
+                            .clamp_range(0.001..=0.9)
+                            .prefix("tool_ray_distance: "),
+                    );
+                    GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .tool_ray_distance = tool_ray_distance;
                 });
-
-                let mut vertex_color_hsv_ratio = GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .vertex_color_hsv_ratio;
-                ui.add(
-                    egui::DragValue::new(&mut vertex_color_hsv_ratio)
-                        .speed(0.1)
-                        .clamp_range(1.0..=15.0)
-                        .prefix("vertex_color_hsv_ratio: "),
-                );
-                GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .vertex_color_hsv_ratio = vertex_color_hsv_ratio;
-
-                //=====
-                let mut point_default_scale = GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .point_default_scale;
-                ui.add(
-                    egui::DragValue::new(&mut point_default_scale)
-                        .speed(0.001)
-                        .clamp_range(0.001..=0.2)
-                        .prefix("scale_default: "),
-                );
-                GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .point_default_scale = point_default_scale;
-
-                //====
-                //=====
-                let mut point_highlight_selected_scale = GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .point_highlight_selected_scale;
-                ui.add(
-                    egui::DragValue::new(&mut point_highlight_selected_scale)
-                        .speed(0.001)
-                        .clamp_range(0.001..=0.2)
-                        .prefix("scale_select: "),
-                );
-                GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .point_highlight_selected_scale = point_highlight_selected_scale;
-
-                //====
-                //=====
-                let mut point_highlight_unselected_scale = GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .point_highlight_unselected_scale;
-                ui.add(
-                    egui::DragValue::new(&mut point_highlight_unselected_scale)
-                        .speed(0.001)
-                        .clamp_range(0.001..=0.2)
-                        .prefix("scale_unselect: "),
-                );
-                GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .point_highlight_unselected_scale = point_highlight_unselected_scale;
-
-                //====
-                let mut tool_ray_radius = GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .tool_ray_radius;
-                ui.add(
-                    egui::DragValue::new(&mut tool_ray_radius)
-                        .speed(0.001)
-                        .clamp_range(0.001..=0.1)
-                        .prefix("tool_ray_radius: "),
-                );
-                GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .tool_ray_radius = tool_ray_radius;
-
-                //==tool_ray_distance
-                let mut tool_ray_distance = GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .tool_ray_distance;
-                ui.add(
-                    egui::DragValue::new(&mut tool_ray_distance)
-                        .speed(0.001)
-                        .clamp_range(0.001..=0.9)
-                        .prefix("tool_ray_distance: "),
-                );
-                GLOBAL_DATA
-                    .get()
-                    .unwrap()
-                    .state
-                    .lock()
-                    .unwrap()
-                    .tool_ray_distance = tool_ray_distance;
             });
         });
-    });
 
     egui::Window::new("IndexViewer")
         .resizable(true)
         .show(ctx, |ui| {
-            let tool_selected_points_index_len = GLOBAL_DATA
+            let mut tool_selected_points_index_len = GLOBAL_DATA
                 .get()
                 .unwrap()
                 .tool_selected_points_index
@@ -1184,9 +1417,19 @@ Click Reser to clear current indexes.
                 .len();
             ui.label(format!("Count: {}", tool_selected_points_index_len));
 
+            if tool_selected_points_index_len > 0{
+                if ui.button("Pop").clicked(){
+                    GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .tool_selected_points_index.lock().unwrap().pop();
+                    tool_selected_points_index_len -=1;
+                }
+            }
+
             for i in 0..tool_selected_points_index_len {
                 ui.push_id(i, |ui| {
-                    ui.collapsing("Vec", |ui| {
+                    ui.collapsing("index", |ui| {
                         ScrollArea::vertical().show(ui, |ui| {
                             // Add a lot of widgets here.
                             ui.vertical(|ui| {
@@ -1198,7 +1441,7 @@ Click Reser to clear current indexes.
                                     .unwrap()[i]
                                     .iter()
                                 {
-                                    ui.label(format!("{}", j, ));
+                                    ui.label(format!("{}", j,));
                                 }
                             });
                         });
@@ -1207,34 +1450,36 @@ Click Reser to clear current indexes.
             }
         });
 
-    egui::Window::new("DataReader").resizable(true).show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            let mut enable_dds_update = GLOBAL_DATA
-                .get()
-                .unwrap()
-                .state
-                .lock()
-                .unwrap()
-                .enable_dds_update;
-            ui.checkbox(&mut enable_dds_update, "Enable");
-            GLOBAL_DATA
-                .get()
-                .unwrap()
-                .state
-                .lock()
-                .unwrap()
-                .enable_dds_update = enable_dds_update;
+    egui::Window::new("DataReader")
+        .resizable(true)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                let mut enable_dds_update = GLOBAL_DATA
+                    .get()
+                    .unwrap()
+                    .state
+                    .lock()
+                    .unwrap()
+                    .enable_dds_update;
+                ui.checkbox(&mut enable_dds_update, "Enable");
+                GLOBAL_DATA
+                    .get()
+                    .unwrap()
+                    .state
+                    .lock()
+                    .unwrap()
+                    .enable_dds_update = enable_dds_update;
 
-            let dds_msg_count = GLOBAL_DATA
-                .get()
-                .unwrap()
-                .state
-                .lock()
-                .unwrap()
-                .dds_msg_count;
-            ui.label(format!("Count: {}", dds_msg_count));
+                let dds_msg_count = GLOBAL_DATA
+                    .get()
+                    .unwrap()
+                    .state
+                    .lock()
+                    .unwrap()
+                    .dds_msg_count;
+                ui.label(format!("Count: {}", dds_msg_count));
+            });
         });
-    });
     egui::Window::new("Marker").resizable(true).show(ctx, |ui| {
         if ui.button("Add").clicked() {
             GLOBAL_DATA
@@ -1304,118 +1549,343 @@ Click Reser to clear current indexes.
         }
     });
 
-    egui::Window::new("Extrinsic").resizable(true).show(ctx, |ui|{
+    egui::Window::new("Extrinsic")
+        .resizable(true)
+        .show(ctx, |ui| {
+            let mut extrinsic = GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap().clone();
 
-        let mut extrinsic = GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap().clone();
+            ui.checkbox(&mut extrinsic.enable, "Enable extrinsic");
 
-        ui.checkbox(&mut extrinsic.enable, "Enable extrinsic");
+            ui.add(
+                egui::DragValue::new(&mut extrinsic.pose.tx)
+                    .speed(0.001)
+                    .clamp_range(-5.0..=5.0)
+                    .prefix("tx: "),
+            );
 
-        ui.add(
-            egui::DragValue::new(&mut extrinsic.pose.tx)
-                .speed(0.001)
-                .clamp_range(-5.0..=5.0)
-                .prefix("tx: "),
-        );
+            ui.add(
+                egui::DragValue::new(&mut extrinsic.pose.ty)
+                    .speed(0.001)
+                    .clamp_range(-5.0..=5.0)
+                    .prefix("ty: "),
+            );
+            ui.add(
+                egui::DragValue::new(&mut extrinsic.pose.tz)
+                    .speed(0.001)
+                    .clamp_range(-5.0..=5.0)
+                    .prefix("tz: "),
+            );
+            ui.add(
+                egui::DragValue::new(&mut extrinsic.pose.roll)
+                    .speed(0.00001)
+                    .clamp_range(-TAU..=TAU)
+                    .prefix("roll: "),
+            );
+            ui.add(
+                egui::DragValue::new(&mut extrinsic.pose.pitch)
+                    .speed(0.00001)
+                    .clamp_range(-TAU..=TAU)
+                    .prefix("pitch: "),
+            );
+            ui.add(
+                egui::DragValue::new(&mut extrinsic.pose.yaw)
+                    .speed(0.00001)
+                    .clamp_range(-TAU..=TAU)
+                    .prefix("yaw: "),
+            );
 
-        ui.add(
-            egui::DragValue::new(&mut extrinsic.pose.ty)
-                .speed(0.001)
-                .clamp_range(-5.0..=5.0)
-                .prefix("ty: "),
-        );
-        ui.add(
-            egui::DragValue::new(&mut extrinsic.pose.tz)
-                .speed(0.001)
-                .clamp_range(-5.0..=5.0)
-                .prefix("tz: "),
-        );
-        ui.add(
-            egui::DragValue::new(&mut extrinsic.pose.roll)
-                .speed(0.00001)
-                .clamp_range(-TAU..=TAU)
-                .prefix("roll: "),
-        );
-        ui.add(
-            egui::DragValue::new(&mut extrinsic.pose.pitch)
-                .speed(0.00001)
-                .clamp_range(-TAU..=TAU)
-                .prefix("pitch: "),
-        );
-        ui.add(
-            egui::DragValue::new(&mut extrinsic.pose.yaw)
-                .speed(0.00001)
-                .clamp_range(-TAU..=TAU)
-                .prefix("yaw: "),
-        );
+            // get cluster num and marker num
+            let marker_pose_len = GLOBAL_DATA.get().unwrap().marker_pose.lock().unwrap().len();
+            let tool_selected_points_index_len = GLOBAL_DATA.get().unwrap().tool_selected_points_index.lock().unwrap().len();
 
-        *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap() = extrinsic;
-    });
+            ui.separator();
+
+            if !extrinsic.enable
+                && marker_pose_len >0
+                && tool_selected_points_index_len > 0
+
+            {
+
+                if ui.button("Add").clicked() {
+                    GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .calib_select
+                        .lock()
+                        .unwrap()
+                        .push(CalibrationSelect {
+                            enable: false,
+                            from_index: 0,
+                            to_index: 0,
+                            program: 0,
+                            weight: 0.0,
+                        });
+                }
+
+                let mut has_calib_select_enable = false;
+                let calib_len = GLOBAL_DATA.get().unwrap().calib_select.lock().unwrap().len();
+                for i in 0..calib_len{
+                    ui.push_id(i,|ui|{
+
+                        let mut calib = GLOBAL_DATA.get().unwrap().calib_select.lock().unwrap()[i];
+
+
+                        ui.checkbox(&mut calib.enable, "Enable");
+                        if calib.enable{
+                            has_calib_select_enable = true;
+                        }
+
+                        ComboBox::from_label("from_index")
+                            .selected_text(calib.from_index.to_string())
+                            .show_ui(ui, |ui| {
+                                for i in 0..tool_selected_points_index_len as u64{
+                                    ui.selectable_value(&mut calib.from_index, i, i.to_string());
+                                }
+                            });
+
+                        ComboBox::from_label("to_index")
+                            .selected_text(calib.to_index.to_string())
+                            .show_ui(ui, |ui| {
+                                for i in 0..marker_pose_len as u64{
+                                    ui.selectable_value(&mut calib.to_index, i, i.to_string());
+                                }
+                            });
+
+
+
+                        GLOBAL_DATA.get().unwrap().calib_select.lock().unwrap()[i] = calib;
+
+                    });
+                }
+
+                let mut calibration_enable = GLOBAL_DATA.get().unwrap().state.lock().unwrap().calibration_enable;
+
+                if has_calib_select_enable{
+                    ui.checkbox(&mut calibration_enable, "Enable");
+
+                }else{
+                    calibration_enable = false;
+                }
+                GLOBAL_DATA.get().unwrap().state.lock().unwrap().calibration_enable = calibration_enable;
+
+                if calibration_enable{
+
+
+
+                    //------------
+                    if let Ok(ref mut mutex) =
+                        GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
+                    {
+                        let CloudFloatVecBuffer {
+                            raw_buffer,
+                            transform_buffer,
+                            render_buffer,
+                            float_num,
+                        } = **mutex;
+
+
+                        let calibration_param:Vec<nx_message_center::base::pointcloud_process::perception::CalibrationParam> = GLOBAL_DATA.get().unwrap().calib_select.lock().unwrap().iter().map(|p|{
+                            let source_ptr = GLOBAL_DATA.get().unwrap().tool_selected_points_index.lock().unwrap()[p.from_index as usize].as_mut_ptr();
+                            let source_len = GLOBAL_DATA.get().unwrap().tool_selected_points_index.lock().unwrap()[p.from_index as usize].len() as u64;
+
+                            let target = GLOBAL_DATA.get().unwrap().marker_pose.lock().unwrap()[p.to_index as usize];
+                            nx_message_center::base::pointcloud_process::perception::CalibrationParam{
+                                index_buffer: source_ptr,
+                                index_num: source_len,
+                                program: p.program,
+                                weight: p.weight,
+                                target_tx: target.pose.tx,
+                                target_ty:  target.pose.ty,
+                                target_tz:  target.pose.tz,
+                                target_roll:  target.pose.roll,
+                                target_pitch:  target.pose.pitch,
+                                target_yaw:  target.pose.yaw,
+                            }
+                        }).collect();
+
+                        let init_tx:f32 = 0.0;
+                        let init_ty:f32 = 0.0;
+                        let init_tz:f32 = 0.0;
+                        let init_roll:f32 = 0.0;
+                        let init_pitch:f32 = 0.0;
+                        let init_yaw:f32 = 0.0;
+
+                        let mut  solve_tx:f32 = 0.0;
+                        let mut  solve_ty:f32 = 0.0;
+                        let mut  solve_tz:f32 = 0.0;
+                        let mut  solve_roll:f32 = 0.0;
+                        let mut  solve_pitch:f32 = 0.0;
+                        let mut  solve_yaw:f32 = 0.0;
+
+
+
+                        let solve_result = nx_message_center::base::pointcloud_process::perception::pointcloud_calib(*raw_buffer.get() as *mut _, (float_num as u64) / 3, &calibration_param, init_tx, init_ty, init_tz, init_roll, init_pitch, init_yaw,
+                                                                                                  &mut solve_tx, &mut solve_ty, &mut solve_tz, &mut solve_roll,  &mut solve_pitch, &mut solve_yaw);
+
+                        ui.label(format!("pointcloud_calib\n solve_result: {}, input: [{}, {}, {}, {}, {}, {}]\n output: [{}, {}, {}, {}, {}, {}]",
+                            solve_result,
+                                         init_tx, init_ty, init_tz, init_roll, init_pitch, init_yaw,
+                                         solve_tx, solve_ty, solve_tz, solve_roll,  solve_pitch, solve_yaw
+                        ));
+
+                    }
+
+
+                    //-------------
+
+
+
+
+
+
+                }
+
+            }
+
+            *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap() = extrinsic;
+        });
 
     egui::Window::new("Filter").resizable(true).show(ctx, |ui| {
         let [height, width] = GLOBAL_DATA.get().unwrap().cloud_dim;
-        let mut filter = GLOBAL_DATA
-            .get()
-            .unwrap()
-            .state
-            .lock()
-            .unwrap()
-            .filter;
+        let mut filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
 
         //=====
 
+        ui.add(
+            Slider::new(&mut filter.filter_height_min, 0..=height as u64).text("filter_height_min"),
+        );
 
-        ui.add(Slider::new(&mut filter.filter_height_min, 0..=height as u64).text("filter_height_min"));
+        ui.add(
+            Slider::new(
+                &mut filter.filter_height_max,
+                filter.filter_height_min..=height as u64,
+            )
+            .text("filter_height_max"),
+        );
 
-        ui.add(Slider::new(&mut filter.filter_height_max, filter.filter_height_min..=height as u64).text("filter_height_max"), );
+        ui.add(
+            Slider::new(&mut filter.filter_width_min, 0..=width as u64).text("filter_width_min"),
+        );
 
-        ui.add(Slider::new(&mut filter.filter_width_min, 0..=width as u64).text("filter_width_min"));
-
-        ui.add(Slider::new(&mut filter.filter_width_max, filter.filter_width_min..=width as u64).text("filter_width_max"), );
+        ui.add(
+            Slider::new(
+                &mut filter.filter_width_max,
+                filter.filter_width_min..=width as u64,
+            )
+            .text("filter_width_max"),
+        );
 
         ui.add(Slider::new(&mut filter.filter_x_min, -5.0..=5.0).text("filter_x_min"));
-        ui.add(Slider::new(&mut filter.filter_x_max, filter.filter_x_min..=5.0).text("filter_x_max"));
+        ui.add(
+            Slider::new(&mut filter.filter_x_max, filter.filter_x_min..=5.0).text("filter_x_max"),
+        );
         ui.add(Slider::new(&mut filter.filter_y_min, -5.0..=5.0).text("filter_y_min"));
-        ui.add(Slider::new(&mut filter.filter_y_max, filter.filter_y_min..=5.0).text("filter_y_max"));
+        ui.add(
+            Slider::new(&mut filter.filter_y_max, filter.filter_y_min..=5.0).text("filter_y_max"),
+        );
         ui.add(Slider::new(&mut filter.filter_z_min, -5.0..=5.0).text("filter_z_min"));
-        ui.add(Slider::new(&mut filter.filter_z_max, filter.filter_z_min..=5.0).text("filter_z_max"));
+        ui.add(
+            Slider::new(&mut filter.filter_z_max, filter.filter_z_min..=5.0).text("filter_z_max"),
+        );
 
-
-
-        let dim_ok =
-            (filter.filter_width_min < filter.filter_width_max && filter.filter_height_min < filter.filter_height_max);
-        let range_ok =
-            (filter.filter_x_min < filter.filter_x_max && filter.filter_y_min < filter.filter_y_max  && filter.filter_z_min < filter.filter_z_max );
+        let dim_ok = (filter.filter_width_min < filter.filter_width_max
+            && filter.filter_height_min < filter.filter_height_max);
+        let range_ok = (filter.filter_x_min < filter.filter_x_max
+            && filter.filter_y_min < filter.filter_y_max
+            && filter.filter_z_min < filter.filter_z_max);
 
         if dim_ok {
-            let mut enable =filter
-                .enable_dim;
+            let mut enable = filter.enable_dim;
             let mut enable = enable.unwrap();
             ui.checkbox(&mut enable, "Enable dim filter");
 
             filter.enable_dim = Some(enable);
         } else {
-             filter .enable_dim = Some(false);
+            filter.enable_dim = Some(false);
         }
         if range_ok {
-            let mut enable =filter
-                .enable_range;
+            let mut enable = filter.enable_range;
             let mut enable = enable.unwrap();
             ui.checkbox(&mut enable, "Enable range filter");
 
             filter.enable_range = Some(enable);
         } else {
-            filter .enable_range = Some(false);
+            filter.enable_range = Some(false);
         }
 
-        GLOBAL_DATA
-            .get()
-            .unwrap()
-            .state
-            .lock()
-            .unwrap()
-            .filter
-            = filter;
+        GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter = filter;
     });
+    egui::Window::new("Detection")
+        .resizable(true)
+        .show(ctx, |ui|{
+
+            // enable
+
+            let mut detection_operator = GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator;
+            // program:
+            // 0 nothing
+            // 1 filter ground
+                // init_ground_range
+                // init_ground_thresh
+                // output_mode
+            ui.checkbox(&mut detection_operator.enable, "Enable detector");
+            ui.add(Slider::new(&mut detection_operator.detection_operator_mode, 0..=10 as u32).text("detection_operator_mode"));
+
+            if detection_operator.enable{
+            }else{
+                detection_operator.detection_operator_mode = 0;
+            }
+
+            ui.separator();
+
+            if detection_operator.detection_operator_mode >= 1{
+
+                ui.label("filter_ground");
+                ui.add(Slider::new(&mut detection_operator.filter_ground.output_mode, 0..=10 as u32).text("output_mode"));
+                ui.separator();
+
+                let [cloud_height, cloud_width] = GLOBAL_DATA.get().unwrap().cloud_dim;
+
+                //
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_height_min, 0..=cloud_height as u64).text("init_ground_height_min"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_height_max, detection_operator.filter_ground.init_ground_height_min..=cloud_height as u64).text("init_ground_height_max"));
+
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_width_min, 0..=cloud_width as u64).text("init_ground_width_min"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_width_max, detection_operator.filter_ground.init_ground_width_min..=cloud_width as u64).text("init_ground_width_max"));
+
+
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cx_min, -3.0..=3.0 as f32).text("init_ground_cx_min"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cx_max, detection_operator.filter_ground.init_ground_cx_min..=3.0 as f32).text("init_ground_cx_max"));
+
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cy_min, -3.0..=3.0 as f32).text("init_ground_cy_min"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cy_max, detection_operator.filter_ground.init_ground_cy_min..=3.0 as f32).text("init_ground_cy_max"));
+
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cz_min, -3.0..=3.0 as f32).text("init_ground_cz_min"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cz_max, detection_operator.filter_ground.init_ground_cz_min..=3.0 as f32).text("init_ground_cz_max"));
+
+                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_nz_min, 0.5..=1.0 as f32).text("init_ground_nz_min"));
+
+                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_x_min, -0.5..=0.5 as f32).text("adaptive_x_min"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_x_max, detection_operator.filter_ground.adaptive_x_min..=0.5 as f32).text("adaptive_x_max"));
+
+                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_y_min, -0.5..=1.0 as f32).text("adaptive_y_min"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_y_max, detection_operator.filter_ground.adaptive_y_min..=0.5 as f32).text("adaptive_y_max"));
+
+                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_z_min, -0.5..=1.0 as f32).text("adaptive_z_min"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_z_max, detection_operator.filter_ground.adaptive_z_min..=0.5 as f32).text("adaptive_z_max"));
+
+            }
+
+
+
+            GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator = detection_operator;
+
+
+            // program return
+
+            
+
+        });
 
     egui::Window::new("Operator")
         .resizable(true)

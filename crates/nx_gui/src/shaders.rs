@@ -38,7 +38,6 @@ pub struct ShaderResConfig
     pub static_point_num: usize,
     pub run_count: usize,
     pub dynamic_point_num: usize,
-
 }
 fn run_if_shader_need_initialise(config: Res<ShaderResConfig>) -> bool
 {
