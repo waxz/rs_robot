@@ -4,7 +4,7 @@ pub mod perception
     use std::ops::Deref;
     use std::ptr::null_mut;
     use nx_common::common::types::UnsafeMutexSender;
-    use crate::binding::{message_handler_t, pointcloud_pallet_detector_t, ta_cfg_t};
+    use crate::binding::{ pointcloud_pallet_detector_t, ta_cfg_t};
 
 
     pub struct PointcloudPalletDetector{
@@ -102,7 +102,63 @@ pub mod perception
 
         }
 
+        pub fn filter_vertical(&mut self, output_mode: u32) ->(*mut f32, u64){
 
+            let ptr = self.handler.get();
+
+            let ret = unsafe{
+                ptr.filter_vertical.unwrap()(
+                    ptr.deref() as *const _ as *mut _,
+                    output_mode
+                )
+            };
+
+            if ret.is_null(){
+                (null_mut(),0 as u64)
+
+            }else{
+                unsafe{
+                    ((*ret).buffer,(*ret).float_num)
+                }
+            }
+
+
+        }
+
+
+        pub fn set_ground_uncertain_thresh(&mut self, far_uncertain_z_max: f32,
+                 far_uncertain_x_change_min: f32,
+                                           far_uncertain_adaptive_z_max: f32,
+                 far_uncertain_row: i32){
+            let ptr = self.handler.get();
+
+            unsafe {
+
+                ptr.set_ground_uncertain_thresh.unwrap()(ptr.deref() as *const _ as *mut _, far_uncertain_z_max, far_uncertain_x_change_min, far_uncertain_adaptive_z_max, far_uncertain_row)
+            }
+        }
+        pub fn filter_pallet(&mut self, output_mode: u32) ->(*mut f32, u64){
+
+            let ptr = self.handler.get();
+
+            let ret = unsafe{
+                ptr.filter_pallet.unwrap()(
+                    ptr.deref() as *const _ as *mut _,
+                    output_mode
+                )
+            };
+
+            if ret.is_null(){
+                (null_mut(),0 as u64)
+
+            }else{
+                unsafe{
+                    ((*ret).buffer,(*ret).float_num)
+                }
+            }
+
+
+        }
     }
 
     impl Drop for PointcloudPalletDetector

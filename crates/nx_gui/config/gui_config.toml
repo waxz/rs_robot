@@ -99,3 +99,43 @@ adaptive_y_min = -0.02
 adaptive_y_max = 0.02
 adaptive_z_min = -0.05
 adaptive_z_max = 0.01
+
+
+#// 0 height min to max
+#// 1 height max to min
+#// 2 width min to max
+#// 3 width max to min
+
+search_direction = 1
+far_uncertain_z_max = 0.03
+far_uncertain_x_change_min = -0.001
+far_uncertain_row = 5
+far_uncertain_adaptive_z_max = 0.01
+
+
+[pallet_detector.filter_vertical]
+output_mode = 0
+#// 0 height min to max
+#// 1 height max to min
+#// 2 width min to max
+#// 3 width max to min
+
+search_direction =1
+
+init_valid_num_min = 100
+#// initial center region
+init_center_height_min = 0
+init_center_height_max = 0
+init_center_width_min = 0
+init_center_width_max = 0
+
+init_center_cx_min = 0.0
+init_center_cx_max = 0.0
+init_center_cy_min = 0.0
+init_center_cy_max = 0.0
+init_center_cz_min = 0.0
+init_center_cz_max = 0.0
+
+pallet_edge_z_min = 0.0
+pallet_edge_z_max = 0.0
+

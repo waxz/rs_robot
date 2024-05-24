@@ -175,6 +175,12 @@ struct GroundFilter{
     adaptive_y_max: f32,
     adaptive_z_min: f32,
     adaptive_z_max: f32,
+    //
+    search_direction :u64,
+    far_uncertain_z_max :f32,
+    far_uncertain_x_change_min : f32,
+    far_uncertain_adaptive_z_max: f32,
+    far_uncertain_row : i32
 
 }
 
@@ -389,6 +395,8 @@ fn main()
                     .dds_msg_count;
                 let mut cloud_height_width = [0,0];
 
+                let mut detection_operator = GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator;
+
                 if enable_dds_update || dds_msg_count == 0 {
                     let recv_cloud = dds_handler.read_data(c"cloud_sub");
                     for m in recv_cloud.iter() {
@@ -524,72 +532,78 @@ fn main()
                         }
                     }
                 }
-                if (dds_msg_count > 0 && extrinsic.enable) {
+                // if(!detection_operator.enable)
+                {
+
+                    if (dds_msg_count > 0 && extrinsic.enable) {
 
 
-                    let transform_buffer = GLOBAL_DATA
-                        .get()
-                        .unwrap()
-                        .cloud_buffer
-                        .lock()
-                        .unwrap()
-                        .transform_buffer;
+                        let transform_buffer = GLOBAL_DATA
+                            .get()
+                            .unwrap()
+                            .cloud_buffer
+                            .lock()
+                            .unwrap()
+                            .transform_buffer;
 
-                    GLOBAL_DATA
-                        .get()
-                        .unwrap()
-                        .cloud_buffer
-                        .lock()
-                        .unwrap()
-                        .render_buffer = transform_buffer;
-                    info!("render_buffer=transform_buffer extrinsic: {:?}", extrinsic);
-                } else {
-                    let raw_buffer = GLOBAL_DATA
-                        .get()
-                        .unwrap()
-                        .cloud_buffer
-                        .lock()
-                        .unwrap()
-                        .raw_buffer;
-                    GLOBAL_DATA
-                        .get()
-                        .unwrap()
-                        .cloud_buffer
-                        .lock()
-                        .unwrap()
-                        .render_buffer = raw_buffer;
-                    info!("render_buffer=raw_buffer")
+                        GLOBAL_DATA
+                            .get()
+                            .unwrap()
+                            .cloud_buffer
+                            .lock()
+                            .unwrap()
+                            .render_buffer = transform_buffer;
+                        // info!("render_buffer=transform_buffer extrinsic: {:?}", extrinsic);
+                    } else {
+                        let raw_buffer = GLOBAL_DATA
+                            .get()
+                            .unwrap()
+                            .cloud_buffer
+                            .lock()
+                            .unwrap()
+                            .raw_buffer;
+                        GLOBAL_DATA
+                            .get()
+                            .unwrap()
+                            .cloud_buffer
+                            .lock()
+                            .unwrap()
+                            .render_buffer = raw_buffer;
+                        // info!("render_buffer=raw_buffer")
+                    }
                 }
+
 
                 if dds_msg_count > 0{
 
-                    let mut detection_operator = GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator;
-                    let filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
-
-                    let [cloud_height, cloud_width] = if filter.enable_dim.unwrap(){
-                        [(filter.filter_height_max
-                            - filter.filter_height_min)
-                            ,  (filter.filter_width_max - filter.filter_width_min)]
-                    }else{
-                        [cloud_height_width[0] as u64, cloud_height_width[1] as u64]
-                    };
-                    let [vx, vy,vz] = if extrinsic.enable{
-                        [extrinsic.pose.tx,
-                            extrinsic.pose.ty,
-                            extrinsic.pose.tz]
-                    }else{
-                        [0.0,0.0,0.0]
-                    };
-
-                    let transform_buffer = GLOBAL_DATA
-                        .get()
-                        .unwrap()
-                        .cloud_buffer
-                        .lock()
-                        .unwrap()
-                        .transform_buffer;
 
                     if detection_operator.enable{
+
+
+                        let filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
+
+                        let [cloud_height, cloud_width] = if filter.enable_dim.unwrap(){
+                            [(filter.filter_height_max
+                                - filter.filter_height_min)
+                                ,  (filter.filter_width_max - filter.filter_width_min)]
+                        }else{
+                            [cloud_height_width[0] as u64, cloud_height_width[1] as u64]
+                        };
+                        let [vx, vy,vz] = if extrinsic.enable{
+                            [extrinsic.pose.tx,
+                                extrinsic.pose.ty,
+                                extrinsic.pose.tz]
+                        }else{
+                            [0.0,0.0,0.0]
+                        };
+
+                        let transform_buffer = GLOBAL_DATA
+                            .get()
+                            .unwrap()
+                            .cloud_buffer
+                            .lock()
+                            .unwrap()
+                            .transform_buffer;
 
                         // set input
                         pallet_detector_handler.set_input(*transform_buffer.get() as *mut _,cloud_height,cloud_width, vx, vy, vz );
@@ -607,6 +621,8 @@ fn main()
                             detection_operator.filter_ground.adaptive_z_min, detection_operator.filter_ground.adaptive_z_max,
 
                         );
+
+                        pallet_detector_handler.set_ground_uncertain_thresh(detection_operator.filter_ground.far_uncertain_z_max, detection_operator.filter_ground.far_uncertain_x_change_min, detection_operator.filter_ground.far_uncertain_adaptive_z_max, detection_operator.filter_ground.far_uncertain_row);
 
                         pallet_detector_handler.set_ground_init_dim(detection_operator.filter_ground.init_ground_height_min,detection_operator.filter_ground.init_ground_height_max,
                                                                     detection_operator.filter_ground.init_ground_width_min,detection_operator.filter_ground.init_ground_width_max);
@@ -1873,6 +1889,13 @@ Click Reser to clear current indexes.
 
                 ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_z_min, -0.5..=1.0 as f32).text("adaptive_z_min"));
                 ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_z_max, detection_operator.filter_ground.adaptive_z_min..=0.5 as f32).text("adaptive_z_max"));
+
+
+                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_z_max, -0.1..=0.1 as f32).text("far_uncertain_z_max"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_adaptive_z_max, -0.1..=0.1 as f32).text("far_uncertain_adaptive_z_max"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_x_change_min, -0.1..=0.1 as f32).text("far_uncertain_x_change_min"));
+                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_row, -20..=20 ).text("far_uncertain_row"));
+
 
             }
 
