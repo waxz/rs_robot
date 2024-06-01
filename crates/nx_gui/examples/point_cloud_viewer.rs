@@ -70,6 +70,8 @@ struct DetectionOperator{
     pub detection_operator_mode: u32,
     pub detection_operator_ret : u32,
     pub filter_ground:GroundFilter,
+    pub filter_vertical:VerticalFilter,
+
 }
 struct SimpleState
 {
@@ -139,6 +141,8 @@ struct CloudFilterConfig
 struct GroundFilter{
     output_mode:u32,
 
+    //
+    search_direction :u64,
     // initial ground region
     init_ground_height_min : u64,
     init_ground_height_max : u64,
@@ -175,12 +179,35 @@ struct GroundFilter{
     adaptive_y_max: f32,
     adaptive_z_min: f32,
     adaptive_z_max: f32,
-    //
-    search_direction :u64,
     far_uncertain_z_max :f32,
     far_uncertain_x_change_min : f32,
     far_uncertain_adaptive_z_max: f32,
     far_uncertain_row : i32
+
+}
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+
+struct VerticalFilter{
+    output_mode:u32,
+
+    //
+    search_direction :u64,
+
+    // dim limut
+    // range limit
+    init_center_height_min : u64,
+    init_center_height_max : u64,
+    init_center_width_min : u64,
+    init_center_width_max : u64,
+    init_center_cx_min: f32,
+    init_center_cx_max: f32,
+    init_center_cy_min: f32,
+    init_center_cy_max: f32,
+    init_center_cz_min: f32,
+    init_center_cz_max: f32,
+    init_center_jx_max: f32,
+    init_center_jy_max: f32,
+    init_center_jz_max: f32,
 
 }
 
@@ -196,6 +223,8 @@ struct GuiConfig
     extrinsic: PoseMarker,
     cloud: CloudConfig,
     filter_ground: GroundFilter,
+    filter_vertical: VerticalFilter,
+
 }
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 struct AppConfig
@@ -332,6 +361,7 @@ fn main()
                         enable: false,
                         filter_ground: app_config.pallet_detector.filter_ground,
                         detection_operator_ret: 0,
+                        filter_vertical: app_config.pallet_detector.filter_vertical,
                     },
                 })),
                 marker_pose: Arc::new(Mutex::new(vec![])),
@@ -462,9 +492,11 @@ fn main()
                                         transform_buffer: UnsafeSender::new(
                                             transform_float_vec.as_ptr(),
                                         ),
-                                        render_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
+                                        render_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
                                         float_num: raw_float_vec.len(),
                                     };
+
+
                             }
                         } else {
                             raw_float_vec = allocator
@@ -490,7 +522,7 @@ fn main()
                                         transform_buffer: UnsafeSender::new(
                                             transform_float_vec.as_ptr(),
                                         ),
-                                        render_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
+                                        render_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
                                         float_num: raw_float_vec.len(),
                                     };
                             }
@@ -627,9 +659,15 @@ fn main()
                         pallet_detector_handler.set_ground_init_dim(detection_operator.filter_ground.init_ground_height_min,detection_operator.filter_ground.init_ground_height_max,
                                                                     detection_operator.filter_ground.init_ground_width_min,detection_operator.filter_ground.init_ground_width_max);
                         // call filter
+                        pallet_detector_handler.set_vertical_init_dim(detection_operator.filter_vertical.init_center_height_min,detection_operator.filter_vertical.init_center_height_max,
+                                                                      detection_operator.filter_vertical.init_center_width_min, detection_operator.filter_vertical.init_center_width_max);
 
-                        let ret ;
-
+                        pallet_detector_handler.set_vertical_init_thresh(detection_operator.filter_vertical.init_center_cx_min,detection_operator.filter_vertical.init_center_cx_max,
+                                                                         detection_operator.filter_vertical.init_center_cy_min,detection_operator.filter_vertical.init_center_cy_max,
+                                                                         detection_operator.filter_vertical.init_center_cz_min,detection_operator.filter_vertical.init_center_cz_max,
+                                                                         detection_operator.filter_vertical.init_center_jx_max,detection_operator.filter_vertical.init_center_jy_max,
+                                                                         detection_operator.filter_vertical.init_center_jz_max
+                        );
 
                         if detection_operator.detection_operator_mode == 1{
                             println!("detection_operator.filter_ground : {:?}",detection_operator.filter_ground);
@@ -646,7 +684,7 @@ fn main()
                                     ref mut float_num,
                                 } = **mutex;
 
-                                ret = pallet_detector_handler.filter_ground(detection_operator.filter_ground.output_mode );
+                                let mut ret = pallet_detector_handler.filter_ground(detection_operator.filter_ground.output_mode );
                                 let (process_buffer,  process_float_num) = ret;
 
                                 if ! process_buffer.is_null() && process_float_num > 0 {
@@ -655,17 +693,41 @@ fn main()
 
                                      *float_num = process_float_num as usize;
                                     println!("set cloud_buffer render_buffer to process_buffer ");
-
-
                                 }
                             }
-
-
-
-
-
                         }
 
+
+                        if detection_operator.detection_operator_mode == 2{
+                            println!("detection_operator.filter_ground : {:?}",detection_operator.filter_ground);
+                            println!("detection_operator.filter_vertical : {:?}",detection_operator.filter_vertical);
+
+
+
+                            if let Ok(ref mut mutex) =
+                                GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
+                            {
+                                let CloudFloatVecBuffer {
+                                    raw_buffer,
+                                    transform_buffer,
+                                    ref mut render_buffer,
+                                    ref mut float_num,
+                                } = **mutex;
+
+                                let mut ret = pallet_detector_handler.filter_ground(detection_operator.filter_ground.output_mode );
+                                ret = pallet_detector_handler.filter_vertical(detection_operator.filter_vertical.output_mode );
+
+                                let (process_buffer,  process_float_num) = ret;
+
+                                if ! process_buffer.is_null() && process_float_num > 0 {
+
+                                    *render_buffer = UnsafeSender::new(process_buffer);
+
+                                    *float_num = process_float_num as usize;
+                                    println!("set cloud_buffer render_buffer to process_buffer ");
+                                }
+                            }
+                        }
 
 
                         match detection_operator.detection_operator_mode {
@@ -701,6 +763,7 @@ fn main()
     app_config.pallet_detector.cloud.filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
 
     app_config.pallet_detector.filter_ground =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator.filter_ground;
+    app_config.pallet_detector.filter_vertical =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator.filter_vertical;
 
     let output_filename = "/tmp/gui_output.toml";
 
@@ -750,6 +813,8 @@ fn set_shader_render_demo(mut config: ResMut<ShaderResConfig>)
     config.run_count = 0;
     info!("set_shader_render_demo: {:?}", config);
 }
+
+//https://www.cs.rit.edu/~ncs/color/t_convert.html
 fn update_shader_render_demo(
     mut query: Query<&mut InstanceMaterialData>,
     mut config: ResMut<ShaderResConfig>,
@@ -876,11 +941,25 @@ fn update_shader_render_demo(
                         b.position.y = a[1];
                         b.position.z = a[2];
                         let r = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+                        let h = (r * distance_ratio).min(360.0);
 
-                        let h = Color::hsl(r * distance_ratio, 0.5, 0.5).as_rgba();
+                        let h = Color::hsl( h , 0.95, 0.7).as_rgba();
+
+                        // let X = (a[0]/r).min(1.0);
+                        // let Y = (a[1]/r).min(1.0);
+                        // let Z = (a[2]/r).min(1.0);
+
+                        // let R =  3.2404542*X - 1.5371385*Y - 0.4985314*Z;
+                        // let G = -0.9692660*X + 1.8760108*Y + 0.0415560*Z;
+                        // let B =  0.0556434*X - 0.2040259*Y + 1.0572252*Z;
+
                         b.color[0] = h.r();
                         b.color[1] = h.g();
                         b.color[2] = h.b();
+                        // b.color[0] = R;
+                        // b.color[1] = G;
+                        // b.color[2] = B;
+
                         b.color[3] = h.a();
                         b.scale = point_default_scale;
                     }
@@ -1836,6 +1915,7 @@ Click Reser to clear current indexes.
         .show(ctx, |ui|{
 
             // enable
+            let [cloud_height, cloud_width] = GLOBAL_DATA.get().unwrap().cloud_dim;
 
             let mut detection_operator = GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator;
             // program:
@@ -1857,44 +1937,106 @@ Click Reser to clear current indexes.
             if detection_operator.detection_operator_mode >= 1{
 
                 ui.label("filter_ground");
-                ui.add(Slider::new(&mut detection_operator.filter_ground.output_mode, 0..=10 as u32).text("output_mode"));
-                ui.separator();
 
-                let [cloud_height, cloud_width] = GLOBAL_DATA.get().unwrap().cloud_dim;
-
-                //
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_height_min, 0..=cloud_height as u64).text("init_ground_height_min"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_height_max, detection_operator.filter_ground.init_ground_height_min..=cloud_height as u64).text("init_ground_height_max"));
-
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_width_min, 0..=cloud_width as u64).text("init_ground_width_min"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_width_max, detection_operator.filter_ground.init_ground_width_min..=cloud_width as u64).text("init_ground_width_max"));
+                ui.collapsing("filter_ground", |ui| {
+                    ScrollArea::vertical().show(ui, |ui| {
+                        // Add a lot of widgets here.
+                        ui.vertical(|ui| {
 
 
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cx_min, -3.0..=3.0 as f32).text("init_ground_cx_min"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cx_max, detection_operator.filter_ground.init_ground_cx_min..=3.0 as f32).text("init_ground_cx_max"));
-
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cy_min, -3.0..=3.0 as f32).text("init_ground_cy_min"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cy_max, detection_operator.filter_ground.init_ground_cy_min..=3.0 as f32).text("init_ground_cy_max"));
-
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cz_min, -3.0..=3.0 as f32).text("init_ground_cz_min"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cz_max, detection_operator.filter_ground.init_ground_cz_min..=3.0 as f32).text("init_ground_cz_max"));
-
-                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_nz_min, 0.5..=1.0 as f32).text("init_ground_nz_min"));
-
-                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_x_min, -0.5..=0.5 as f32).text("adaptive_x_min"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_x_max, detection_operator.filter_ground.adaptive_x_min..=0.5 as f32).text("adaptive_x_max"));
-
-                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_y_min, -0.5..=1.0 as f32).text("adaptive_y_min"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_y_max, detection_operator.filter_ground.adaptive_y_min..=0.5 as f32).text("adaptive_y_max"));
-
-                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_z_min, -0.5..=1.0 as f32).text("adaptive_z_min"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_z_max, detection_operator.filter_ground.adaptive_z_min..=0.5 as f32).text("adaptive_z_max"));
+                            {
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.output_mode, 0..=10 as u32).text("output_mode"));
 
 
-                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_z_max, -0.1..=0.1 as f32).text("far_uncertain_z_max"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_adaptive_z_max, -0.1..=0.1 as f32).text("far_uncertain_adaptive_z_max"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_x_change_min, -0.1..=0.1 as f32).text("far_uncertain_x_change_min"));
-                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_row, -20..=20 ).text("far_uncertain_row"));
+                                //
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_height_min, 0..=cloud_height as u64).text("init_ground_height_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_height_max, detection_operator.filter_ground.init_ground_height_min..=cloud_height as u64).text("init_ground_height_max"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_width_min, 0..=cloud_width as u64).text("init_ground_width_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_width_max, detection_operator.filter_ground.init_ground_width_min..=cloud_width as u64).text("init_ground_width_max"));
+
+
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cx_min, -3.0..=3.0 as f32).text("init_ground_cx_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cx_max, detection_operator.filter_ground.init_ground_cx_min..=3.0 as f32).text("init_ground_cx_max"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cy_min, -3.0..=3.0 as f32).text("init_ground_cy_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cy_max, detection_operator.filter_ground.init_ground_cy_min..=3.0 as f32).text("init_ground_cy_max"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cz_min, -3.0..=3.0 as f32).text("init_ground_cz_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cz_max, detection_operator.filter_ground.init_ground_cz_min..=3.0 as f32).text("init_ground_cz_max"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_nz_min, 0.5..=1.0 as f32).text("init_ground_nz_min"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_x_min, -0.5..=0.5 as f32).text("adaptive_x_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_x_max, detection_operator.filter_ground.adaptive_x_min..=0.5 as f32).text("adaptive_x_max"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_y_min, -0.5..=1.0 as f32).text("adaptive_y_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_y_max, detection_operator.filter_ground.adaptive_y_min..=0.5 as f32).text("adaptive_y_max"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_z_min, -0.5..=1.0 as f32).text("adaptive_z_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_z_max, detection_operator.filter_ground.adaptive_z_min..=0.5 as f32).text("adaptive_z_max"));
+
+
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_z_max, -0.1..=0.1 as f32).text("far_uncertain_z_max"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_adaptive_z_max, -0.1..=0.1 as f32).text("far_uncertain_adaptive_z_max"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_x_change_min, -0.1..=0.1 as f32).text("far_uncertain_x_change_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_row, -20..=20 ).text("far_uncertain_row"));
+
+
+                            }
+
+
+
+                        });
+                    });
+                }); // this is fine!
+
+
+
+
+            }
+            if detection_operator.detection_operator_mode >= 2{
+
+
+                ui.collapsing("filter_vertical", |ui| {
+                    ScrollArea::vertical().show(ui, |ui| {
+                        // Add a lot of widgets here.
+                        ui.vertical(|ui| {
+
+
+                            {
+
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.output_mode, 0..=10 as u32).text("output_mode"));
+
+
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_height_min, 0..=cloud_height as u64).text("init_center_height_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_height_max, detection_operator.filter_vertical.init_center_height_min..=cloud_height as u64).text("init_center_height_max"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_width_min, 0..=cloud_width as u64).text("init_center_width_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_width_max, detection_operator.filter_vertical.init_center_width_min..=cloud_width as u64).text("init_center_width_max"));
+
+
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cx_min, -3.0..=3.0 as f32).text("init_center_cx_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cx_max, detection_operator.filter_vertical.init_center_cx_min..=3.0 as f32).text("init_center_cx_max"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cy_min, -3.0..=3.0 as f32).text("init_center_cy_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cy_max, detection_operator.filter_vertical.init_center_cy_min..=3.0 as f32).text("init_center_cy_max"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cz_min, -3.0..=3.0 as f32).text("init_center_cz_min"));
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cz_max, detection_operator.filter_vertical.init_center_cz_min..=3.0 as f32).text("init_center_cz_max"));
+
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_jx_max, -0.2..=0.2 as f32).text("init_center_jx_max"));
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_jy_max, -0.2..=0.2 as f32).text("init_center_jy_max"));
+                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_jz_max, -0.2..=0.2 as f32).text("init_center_jz_max"));
+
+
+                            }
+
+
+
+                        });
+                    });
+                }); // this is fine!
 
 
             }

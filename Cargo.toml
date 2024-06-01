@@ -34,6 +34,7 @@ bindgen = "0.65.1"
 #https://xxchan.me/cs/2023/02/17/optimize-rust-comptime-en.html
 
 [profile.dev]
+# Enable a small amount of optimization in debug mode
 opt-level = 2
 debug = "line-tables-only"
 #split-debuginfo = '...'  # Platform-specific.
@@ -45,6 +46,12 @@ panic = 'unwind'
 incremental = true
 codegen-units = 1
 rpath = true
+
+
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
 
 
 

@@ -2730,6 +2730,29 @@ pub struct pointcloud_pallet_detector_t {
             z_max: f32_t,
         ),
     >,
+    pub set_vertical_init_dim: ::std::option::Option<
+        unsafe extern "C" fn(
+            h: *mut pointcloud_pallet_detector_t,
+            height_min: u64_t,
+            height_max: u64_t,
+            width_min: u64_t,
+            width_max: u64_t,
+        ),
+    >,
+    pub set_vertical_init_thresh: ::std::option::Option<
+        unsafe extern "C" fn(
+            h: *mut pointcloud_pallet_detector_t,
+            x_min: f32_t,
+            x_max: f32_t,
+            y_min: f32_t,
+            y_max: f32_t,
+            z_min: f32_t,
+            z_max: f32_t,
+            jx_max: f32_t,
+            jy_max: f32_t,
+            jz_max: f32_t,
+        ),
+    >,
     pub set_ground_uncertain_thresh: ::std::option::Option<
         unsafe extern "C" fn(
             h: *mut pointcloud_pallet_detector_t,
@@ -2764,7 +2787,7 @@ fn bindgen_test_layout_pointcloud_pallet_detector_t() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<pointcloud_pallet_detector_t>(),
-        104usize,
+        120usize,
         concat!("Size of: ", stringify!(pointcloud_pallet_detector_t))
     );
     assert_eq!(
@@ -2853,8 +2876,28 @@ fn bindgen_test_layout_pointcloud_pallet_detector_t() {
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).set_ground_uncertain_thresh) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).set_vertical_init_dim) as usize - ptr as usize },
         64usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(set_vertical_init_dim)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).set_vertical_init_thresh) as usize - ptr as usize },
+        72usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(set_vertical_init_thresh)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).set_ground_uncertain_thresh) as usize - ptr as usize },
+        80usize,
         concat!(
             "Offset of field: ",
             stringify!(pointcloud_pallet_detector_t),
@@ -2864,7 +2907,7 @@ fn bindgen_test_layout_pointcloud_pallet_detector_t() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).filter_vertical) as usize - ptr as usize },
-        72usize,
+        88usize,
         concat!(
             "Offset of field: ",
             stringify!(pointcloud_pallet_detector_t),
@@ -2874,7 +2917,7 @@ fn bindgen_test_layout_pointcloud_pallet_detector_t() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).filter_pallet) as usize - ptr as usize },
-        80usize,
+        96usize,
         concat!(
             "Offset of field: ",
             stringify!(pointcloud_pallet_detector_t),
@@ -2884,7 +2927,7 @@ fn bindgen_test_layout_pointcloud_pallet_detector_t() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).find_pallet) as usize - ptr as usize },
-        88usize,
+        104usize,
         concat!(
             "Offset of field: ",
             stringify!(pointcloud_pallet_detector_t),
@@ -2894,7 +2937,7 @@ fn bindgen_test_layout_pointcloud_pallet_detector_t() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).compute_pallet) as usize - ptr as usize },
-        96usize,
+        112usize,
         concat!(
             "Offset of field: ",
             stringify!(pointcloud_pallet_detector_t),

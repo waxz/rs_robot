@@ -102,6 +102,25 @@ pub mod perception
 
         }
 
+        pub fn set_vertical_init_dim(&mut self, height_min:u64, height_max:u64, width_min:u64, width_max:u64){
+            let ptr = self.handler.get();
+
+            println!("set_ground_init_dim: {}, {}, {}, {} ",height_min, height_max, width_min,width_max);
+            unsafe {
+                ptr.set_vertical_init_dim.unwrap()(ptr.deref() as *const _ as *mut _, height_min, height_max, width_min,width_max)
+            }
+        }
+
+        pub fn set_vertical_init_thresh(&mut self, x_min:f32, x_max:f32, y_min:f32, y_max:f32, z_min:f32, z_max:f32, jx_max : f32, jy_max : f32, jz_max : f32){
+            let ptr = self.handler.get();
+            println!("set_ground_init_dim: {}, {}, {}, {}, {}, {} ",x_min, x_max, y_min, y_max, z_min, z_max);
+
+            unsafe {
+                ptr.set_vertical_init_thresh.unwrap()(ptr.deref() as *const _ as *mut _, x_min, x_max, y_min, y_max, z_min, z_max,jx_max, jy_max,jz_max )
+            }
+
+        }
+
         pub fn filter_vertical(&mut self, output_mode: u32) ->(*mut f32, u64){
 
             let ptr = self.handler.get();

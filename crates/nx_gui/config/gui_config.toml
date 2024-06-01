@@ -123,18 +123,36 @@ output_mode = 0
 search_direction =1
 
 init_valid_num_min = 100
+init_row_valid_num_min = 40
 #// initial center region
 init_center_height_min = 0
-init_center_height_max = 0
-init_center_width_min = 0
-init_center_width_max = 0
+init_center_height_max = 70
+init_center_width_min = 200
+init_center_width_max = 260
 
-init_center_cx_min = 0.0
-init_center_cx_max = 0.0
-init_center_cy_min = 0.0
-init_center_cy_max = 0.0
+init_center_mean_window_len = 5
+init_center_mean_search_len = 6
+init_center_mean_window_jx_max = 0.01
+init_center_mean_window_jy_max = 0.01
+init_center_mean_window_jz_max = 0.01
+init_center_line_search_start_index = 10
+
+init_center_line_center_dist_max = 0.02
+init_center_line_length_min = 0.2
+
+
+init_center_cx_min = -2.0
+init_center_cx_max = -1.5
+init_center_cy_min = -0.3
+init_center_cy_max = 0.3
 init_center_cz_min = 0.0
-init_center_cz_max = 0.0
+init_center_cz_max = 0.2
+
+init_center_jx_max = 0.009999999776482582
+init_center_jy_max = 0.0020000000949949026
+init_center_jz_max = 0.029999999329447746
+
+
 
 pallet_edge_z_min = 0.0
 pallet_edge_z_max = 0.0
