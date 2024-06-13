@@ -144,6 +144,24 @@ pub mod perception
 
         }
 
+        pub fn set_pallet_row(&mut self, row_high: i32, row_low : i32){
+            let ptr = self.handler.get();
+
+            unsafe {
+
+                ptr.set_pallet_row.unwrap()(ptr.deref() as *const _ as *mut _, row_high, row_low)
+            }
+        }
+
+        pub fn set_pallet_thresh(&mut self, x_min:f32, x_max:f32, y_min:f32, y_max:f32, z_min:f32, z_max:f32, jx_max : f32, jy_max : f32, jz_max : f32){
+            let ptr = self.handler.get();
+            println!("set_ground_init_dim: {}, {}, {}, {}, {}, {} ",x_min, x_max, y_min, y_max, z_min, z_max);
+
+            unsafe {
+                ptr.set_pallet_thresh.unwrap()(ptr.deref() as *const _ as *mut _, x_min, x_max, y_min, y_max, z_min, z_max,jx_max, jy_max,jz_max )
+            }
+
+        }
 
         pub fn set_ground_uncertain_thresh(&mut self, far_uncertain_z_max: f32,
                  far_uncertain_x_change_min: f32,

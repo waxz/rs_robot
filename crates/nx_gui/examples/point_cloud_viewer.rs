@@ -71,6 +71,7 @@ struct DetectionOperator{
     pub detection_operator_ret : u32,
     pub filter_ground:GroundFilter,
     pub filter_vertical:VerticalFilter,
+    pub filter_pallet: PalletFilter,
 
 }
 struct SimpleState
@@ -122,13 +123,16 @@ struct CloudDimConfig
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 struct CloudFilterConfig
 {
-    enable_dim: Option<bool>,
+    enable_mean_window: bool,
+    mean_window_len: u32,
+
+    enable_dim: bool,//Option<bool>,
     filter_height_min: u64,
     filter_height_max: u64,
     filter_width_min: u64,
     filter_width_max: u64,
 
-    enable_range: Option<bool>,
+    enable_range: bool,//Option<bool>,
     filter_x_min: f32,
     filter_y_min: f32,
     filter_z_min: f32,
@@ -187,6 +191,30 @@ struct GroundFilter{
 }
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 
+struct PalletFilter{
+    output_mode:u32,
+
+    //
+    search_direction :u64,
+
+    //
+    filter_pallet_row_high : i32,
+    filter_pallet_row_low : i32,
+
+filter_pallet_x_min: f32,
+filter_pallet_x_max: f32,
+filter_pallet_y_min: f32,
+filter_pallet_y_max: f32,
+filter_pallet_z_min: f32,
+filter_pallet_z_max: f32,
+filter_pallet_jx: f32,
+filter_pallet_jy: f32,
+filter_pallet_jz: f32,
+
+}
+#[derive(Debug, Serialize, Deserialize, Copy, Clone)]
+
+
 struct VerticalFilter{
     output_mode:u32,
 
@@ -224,6 +252,7 @@ struct GuiConfig
     cloud: CloudConfig,
     filter_ground: GroundFilter,
     filter_vertical: VerticalFilter,
+    filter_pallet:PalletFilter,
 
 }
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
@@ -362,6 +391,7 @@ fn main()
                         filter_ground: app_config.pallet_detector.filter_ground,
                         detection_operator_ret: 0,
                         filter_vertical: app_config.pallet_detector.filter_vertical,
+                        filter_pallet: app_config.pallet_detector.filter_pallet,
                     },
                 })),
                 marker_pose: Arc::new(Mutex::new(vec![])),
@@ -451,16 +481,16 @@ fn main()
 
                         cloud_height_width = data.get_height_width();
 
-                        println!(
-                            "recv data [{:?}] at {:?},cloud_float_vec.len : {}",
-                            frame_id,
-                            stamp,
-                            cloud_float_vec.len()
-                        );
+                        // println!(
+                        //     "recv data [{:?}] at {:?},cloud_float_vec.len : {}",
+                        //     frame_id,
+                        //     stamp,
+                        //     cloud_float_vec.len()
+                        // );
 
                         let filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
 
-                        if filter.enable_dim.unwrap() {
+                        if filter.enable_dim {
                             let float_vec_len = (filter.filter_height_max
                                 - filter.filter_height_min)
                                 * (filter.filter_width_max - filter.filter_width_min)
@@ -472,7 +502,7 @@ fn main()
                                 float_vec_len as usize,
                             );
 
-                            info!("clip cloud to float_vec_len {} ", float_vec_len);
+                            // info!("clip cloud to float_vec_len {} ", float_vec_len);
                             // use nx_message_center::base::pointcloud_process::perception::pointcloud_clip;
                             pointcloud_clip(
                                 cloud_float_vec.as_ptr() as *mut _,
@@ -486,15 +516,19 @@ fn main()
                             );
 
                             {
-                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
-                                    CloudFloatVecBuffer {
-                                        raw_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
-                                        transform_buffer: UnsafeSender::new(
-                                            transform_float_vec.as_ptr(),
-                                        ),
-                                        render_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
-                                        float_num: raw_float_vec.len(),
-                                    };
+                                GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().raw_buffer = UnsafeSender::new(raw_float_vec.as_ptr());
+                                GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().float_num = raw_float_vec.len();
+
+
+                                // *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
+                                //     CloudFloatVecBuffer {
+                                //         raw_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
+                                //         transform_buffer: UnsafeSender::new(
+                                //             transform_float_vec.as_ptr(),
+                                //         ),
+                                //         render_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
+                                //         float_num: raw_float_vec.len(),
+                                //     };
 
 
                             }
@@ -516,15 +550,19 @@ fn main()
                             }
 
                             {
-                                *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
-                                    CloudFloatVecBuffer {
-                                        raw_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
-                                        transform_buffer: UnsafeSender::new(
-                                            transform_float_vec.as_ptr(),
-                                        ),
-                                        render_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
-                                        float_num: raw_float_vec.len(),
-                                    };
+                                GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().raw_buffer = UnsafeSender::new(raw_float_vec.as_ptr());
+                                GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().float_num = raw_float_vec.len();
+
+                                // *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
+                                //     CloudFloatVecBuffer {
+                                //         raw_buffer: UnsafeSender::new(raw_float_vec.as_ptr()),
+                                //         transform_buffer: UnsafeSender::new(
+                                //             transform_float_vec.as_ptr(),
+                                //         ),
+                                //         render_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
+                                //         float_num: raw_float_vec.len(),
+                                //     };
+
                             }
                         }
                     }
@@ -564,7 +602,7 @@ fn main()
                         }
                     }
                 }
-                // if(!detection_operator.enable)
+                if(!detection_operator.enable)
                 {
 
                     if (dds_msg_count > 0 && extrinsic.enable) {
@@ -614,7 +652,7 @@ fn main()
 
                         let filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
 
-                        let [cloud_height, cloud_width] = if filter.enable_dim.unwrap(){
+                        let [cloud_height, cloud_width] = if filter.enable_dim{
                             [(filter.filter_height_max
                                 - filter.filter_height_min)
                                 ,  (filter.filter_width_max - filter.filter_width_min)]
@@ -636,38 +674,47 @@ fn main()
                             .lock()
                             .unwrap()
                             .transform_buffer;
+                        if( detection_operator.detection_operator_mode  > 0){
+                            // set input
+                            pallet_detector_handler.set_input(*transform_buffer.get() as *mut _,cloud_height,cloud_width, vx, vy, vz );
 
-                        // set input
-                        pallet_detector_handler.set_input(*transform_buffer.get() as *mut _,cloud_height,cloud_width, vx, vy, vz );
+                            // set ground init dim
+                            pallet_detector_handler.set_ground_init_thresh( detection_operator.filter_ground.init_ground_cx_min,detection_operator.filter_ground.init_ground_cx_max,
+                                                                            detection_operator.filter_ground.init_ground_cy_min,detection_operator.filter_ground.init_ground_cy_max,
+                                                                            detection_operator.filter_ground.init_ground_cz_min,detection_operator.filter_ground.init_ground_cz_max,
+                                                                            detection_operator.filter_ground.init_ground_nz_min
 
-                        // set ground init dim
-                        pallet_detector_handler.set_ground_init_thresh( detection_operator.filter_ground.init_ground_cx_min,detection_operator.filter_ground.init_ground_cx_max,
-                                                                        detection_operator.filter_ground.init_ground_cy_min,detection_operator.filter_ground.init_ground_cy_max,
-                                                                        detection_operator.filter_ground.init_ground_cz_min,detection_operator.filter_ground.init_ground_cz_max,
-                                                                        detection_operator.filter_ground.init_ground_nz_min
+                            );
+                            pallet_detector_handler.set_ground_adaptive_thresh(
+                                detection_operator.filter_ground.adaptive_x_min, detection_operator.filter_ground.adaptive_x_max,
+                                detection_operator.filter_ground.adaptive_y_min, detection_operator.filter_ground.adaptive_y_max,
+                                detection_operator.filter_ground.adaptive_z_min, detection_operator.filter_ground.adaptive_z_max,
 
-                        );
-                        pallet_detector_handler.set_ground_adaptive_thresh(
-                            detection_operator.filter_ground.adaptive_x_min, detection_operator.filter_ground.adaptive_x_max,
-                            detection_operator.filter_ground.adaptive_y_min, detection_operator.filter_ground.adaptive_y_max,
-                            detection_operator.filter_ground.adaptive_z_min, detection_operator.filter_ground.adaptive_z_max,
+                            );
 
-                        );
+                            pallet_detector_handler.set_ground_uncertain_thresh(detection_operator.filter_ground.far_uncertain_z_max, detection_operator.filter_ground.far_uncertain_x_change_min, detection_operator.filter_ground.far_uncertain_adaptive_z_max, detection_operator.filter_ground.far_uncertain_row);
 
-                        pallet_detector_handler.set_ground_uncertain_thresh(detection_operator.filter_ground.far_uncertain_z_max, detection_operator.filter_ground.far_uncertain_x_change_min, detection_operator.filter_ground.far_uncertain_adaptive_z_max, detection_operator.filter_ground.far_uncertain_row);
+                            pallet_detector_handler.set_ground_init_dim(detection_operator.filter_ground.init_ground_height_min,detection_operator.filter_ground.init_ground_height_max,
+                                                                        detection_operator.filter_ground.init_ground_width_min,detection_operator.filter_ground.init_ground_width_max);
+                            // call filter
+                            pallet_detector_handler.set_vertical_init_dim(detection_operator.filter_vertical.init_center_height_min,detection_operator.filter_vertical.init_center_height_max,
+                                                                          detection_operator.filter_vertical.init_center_width_min, detection_operator.filter_vertical.init_center_width_max);
 
-                        pallet_detector_handler.set_ground_init_dim(detection_operator.filter_ground.init_ground_height_min,detection_operator.filter_ground.init_ground_height_max,
-                                                                    detection_operator.filter_ground.init_ground_width_min,detection_operator.filter_ground.init_ground_width_max);
-                        // call filter
-                        pallet_detector_handler.set_vertical_init_dim(detection_operator.filter_vertical.init_center_height_min,detection_operator.filter_vertical.init_center_height_max,
-                                                                      detection_operator.filter_vertical.init_center_width_min, detection_operator.filter_vertical.init_center_width_max);
+                            pallet_detector_handler.set_vertical_init_thresh(detection_operator.filter_vertical.init_center_cx_min,detection_operator.filter_vertical.init_center_cx_max,
+                                                                             detection_operator.filter_vertical.init_center_cy_min,detection_operator.filter_vertical.init_center_cy_max,
+                                                                             detection_operator.filter_vertical.init_center_cz_min,detection_operator.filter_vertical.init_center_cz_max,
+                                                                             detection_operator.filter_vertical.init_center_jx_max,detection_operator.filter_vertical.init_center_jy_max,
+                                                                             detection_operator.filter_vertical.init_center_jz_max
+                            );
+                            pallet_detector_handler.set_pallet_row(detection_operator.filter_pallet.filter_pallet_row_high,detection_operator.filter_pallet.filter_pallet_row_low );
+                            pallet_detector_handler.set_pallet_thresh(detection_operator.filter_pallet.filter_pallet_x_min,detection_operator.filter_pallet.filter_pallet_x_max,
+                                                                      detection_operator.filter_pallet.filter_pallet_y_min,detection_operator.filter_pallet.filter_pallet_y_max,
+                                                                      detection_operator.filter_pallet.filter_pallet_z_min,detection_operator.filter_pallet.filter_pallet_z_max,
+                                                                      detection_operator.filter_pallet.filter_pallet_jx,detection_operator.filter_pallet.filter_pallet_jy,
+                                                                      detection_operator.filter_pallet.filter_pallet_jz
+                            );
+                        }
 
-                        pallet_detector_handler.set_vertical_init_thresh(detection_operator.filter_vertical.init_center_cx_min,detection_operator.filter_vertical.init_center_cx_max,
-                                                                         detection_operator.filter_vertical.init_center_cy_min,detection_operator.filter_vertical.init_center_cy_max,
-                                                                         detection_operator.filter_vertical.init_center_cz_min,detection_operator.filter_vertical.init_center_cz_max,
-                                                                         detection_operator.filter_vertical.init_center_jx_max,detection_operator.filter_vertical.init_center_jy_max,
-                                                                         detection_operator.filter_vertical.init_center_jz_max
-                        );
 
                         if detection_operator.detection_operator_mode == 1{
                             println!("detection_operator.filter_ground : {:?}",detection_operator.filter_ground);
@@ -730,15 +777,42 @@ fn main()
                         }
 
 
-                        match detection_operator.detection_operator_mode {
-                            0 => {
+                        if detection_operator.detection_operator_mode == 3{
+                            println!("detection_operator.filter_ground : {:?}",detection_operator.filter_ground);
+                            println!("detection_operator.filter_vertical : {:?}",detection_operator.filter_vertical);
 
 
-                            },
-                            _ =>{
 
+                            if let Ok(ref mut mutex) =
+                                GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
+                            {
+                                let CloudFloatVecBuffer {
+                                    raw_buffer,
+                                    transform_buffer,
+                                    ref mut render_buffer,
+                                    ref mut float_num,
+                                } = **mutex;
+
+                                let mut ret = pallet_detector_handler.filter_ground(detection_operator.filter_ground.output_mode );
+                                ret = pallet_detector_handler.filter_vertical(detection_operator.filter_vertical.output_mode );
+
+                                ret = pallet_detector_handler.filter_pallet(detection_operator.filter_pallet.output_mode);
+
+                                let (process_buffer,  process_float_num) = ret;
+
+                                if ! process_buffer.is_null() && process_float_num > 0 {
+
+                                    *render_buffer = UnsafeSender::new(process_buffer);
+
+                                    *float_num = process_float_num as usize;
+                                    println!("set cloud_buffer render_buffer to process_buffer ");
+                                }
                             }
+
                         }
+
+
+                        // detection_operator.detection_operator_mode = 0;
 
                     }
                     GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator = detection_operator;
@@ -764,6 +838,7 @@ fn main()
 
     app_config.pallet_detector.filter_ground =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator.filter_ground;
     app_config.pallet_detector.filter_vertical =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator.filter_vertical;
+    app_config.pallet_detector.filter_pallet =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator.filter_pallet;
 
     let output_filename = "/tmp/gui_output.toml";
 
@@ -1038,7 +1113,7 @@ fn update_shader_render_demo(
                     }
                 }
             } else {
-                println!("GLOBAL_DATA try_lock failed");
+                // println!("GLOBAL_DATA try_lock failed");
             }
         } else {
             println!("GLOBAL_DATA empty");
@@ -1890,22 +1965,22 @@ Click Reser to clear current indexes.
             && filter.filter_z_min < filter.filter_z_max);
 
         if dim_ok {
-            let mut enable = filter.enable_dim;
-            let mut enable = enable.unwrap();
-            ui.checkbox(&mut enable, "Enable dim filter");
+            // let mut enable = filter.enable_dim;
+            // let mut enable = enable;//.unwrap();
+            ui.checkbox(&mut filter.enable_dim, "Enable dim filter");
 
-            filter.enable_dim = Some(enable);
+            // filter.enable_dim = enable;//Some(enable);
         } else {
-            filter.enable_dim = Some(false);
+            filter.enable_dim = false;//Some(false);
         }
         if range_ok {
-            let mut enable = filter.enable_range;
-            let mut enable = enable.unwrap();
-            ui.checkbox(&mut enable, "Enable range filter");
+            // let mut enable = filter.enable_range;
+            // let mut enable = enable.unwrap();
+            ui.checkbox(&mut filter.enable_range, "Enable range filter");
 
-            filter.enable_range = Some(enable);
+            // filter.enable_range =enable;// Some(enable);
         } else {
-            filter.enable_range = Some(false);
+            filter.enable_range = false;//Some(false);
         }
 
         GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter = filter;
@@ -2041,6 +2116,38 @@ Click Reser to clear current indexes.
 
             }
 
+            if detection_operator.detection_operator_mode >= 3{
+                ui.collapsing("filter_pallet", |ui|{
+
+                    ScrollArea::vertical().show(ui, |ui|{
+                        ui.vertical(|ui|{
+
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.output_mode, 0..=100 as u32).text("output_mode"));
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_row_low, -100..=100 as i32).text("filter_pallet_row_low"));
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_row_high, -100..=100 as i32).text("filter_pallet_row_high"));
+
+
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_x_min, -0.5..=0.5 as f32).text("filter_pallet_x_min"));
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_x_max, detection_operator.filter_pallet.filter_pallet_x_min..=0.5 as f32).text("filter_pallet_x_max"));
+
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_y_min, -1.5..=1.5 as f32).text("filter_pallet_y_min"));
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_y_max, detection_operator.filter_pallet.filter_pallet_y_min..=1.5 as f32).text("filter_pallet_y_max"));
+
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_z_min, -0.5..=0.5 as f32).text("filter_pallet_z_min"));
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_z_max, detection_operator.filter_pallet.filter_pallet_z_min..=0.5 as f32).text("filter_pallet_z_max"));
+
+
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_jx, -0.2..=0.2 as f32).text("filter_pallet_jx"));
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_jy, -0.2..=0.2 as f32).text("filter_pallet_jy"));
+                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_jz, -0.2..=0.2 as f32).text("filter_pallet_jz"));
+
+
+                        });
+                    });
+
+
+                });
+            }
 
 
             GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator = detection_operator;

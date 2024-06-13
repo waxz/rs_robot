@@ -30,7 +30,7 @@ qos_queue_size = 2
 
 # 1.57079632679489661923132169163975144
 #3.14159265358979323846264338327950288
-[pallet_detector.extrinsic.pose]
+[pallet_detector.extrinsic.pose1]
 tx = 0.4000000059604645
 ty = 0.01
 tz = 0.6586700081825256
@@ -38,13 +38,22 @@ roll = -1.5707963705062866
 pitch = 0.0
 yaw = 1.5707963705062866
 
+[pallet_detector.extrinsic.pose]
+tx = 0.4000000059604645
+ty = 0.009999999776482582
+tz = 0.5001800060272217
+roll = -1.5707963705062866
+pitch = 0.0
+yaw = 1.5707963705062866
+
+
 [pallet_detector.extrinsic]
 enable = true
 
 [pallet_detector.cloud.dim]
 height = 480
 width = 640
-[pallet_detector.cloud.filter]
+[pallet_detector.cloud.filter1]
 
 enable_dim = true
 filter_height_min = 330
@@ -60,7 +69,25 @@ filter_y_max = 1.5
 filter_z_min = -0.2
 filter_z_max = 1.0
 
-[pallet_detector.filter_ground]
+[pallet_detector.cloud.filter]
+enable_mean_window = true
+mean_window_len = 10
+
+enable_dim = true
+filter_height_min = 300
+filter_height_max = 440
+filter_width_min = 110
+filter_width_max = 530
+enable_range = false
+filter_x_min = -5.0
+filter_y_min = -1.5
+filter_z_min = -0.20000000298023224
+filter_x_max = -1.0
+filter_y_max = 1.5
+filter_z_max = 1.0
+
+
+[pallet_detector.filter_ground1]
 init_valid_num_min = 100
 output_mode = 0
 #// initial ground region
@@ -112,8 +139,40 @@ far_uncertain_x_change_min = -0.001
 far_uncertain_row = 5
 far_uncertain_adaptive_z_max = 0.01
 
+[pallet_detector.filter_ground]
+init_valid_num_min = 100
 
-[pallet_detector.filter_vertical]
+output_mode = 1
+search_direction = 1
+init_ground_height_min = 70
+init_ground_height_max = 130
+init_ground_width_min = 150
+init_ground_width_max = 320
+init_ground_cx_min = -1.899999976158142
+init_ground_cx_max = -1.0
+init_ground_cy_min = -0.5
+init_ground_cy_max = 0.5
+init_ground_cz_min = -0.05000000074505806
+init_ground_cz_max = 0.05000000074505806
+init_ground_nz_min = 0.8999999761581421
+ray_height_min = 0
+ray_height_max = 0
+ray_width_min = 0
+ray_width_max = 0
+scan_width_step = 0
+adaptive_x_min = -0.019999999552965164
+adaptive_x_max = 0.019999999552965164
+adaptive_y_min = -0.019999999552965164
+adaptive_y_max = 0.019999999552965164
+adaptive_z_min = -0.05000000074505806
+adaptive_z_max = 0.009999999776482582
+far_uncertain_z_max = 0.029999999329447746
+far_uncertain_x_change_min = -0.0010000000474974513
+far_uncertain_adaptive_z_max = 0.009999999776482582
+far_uncertain_row = 5
+
+
+[pallet_detector.filter_vertical1]
 output_mode = 0
 #// 0 height min to max
 #// 1 height max to min
@@ -157,3 +216,124 @@ init_center_jz_max = 0.029999999329447746
 pallet_edge_z_min = 0.0
 pallet_edge_z_max = 0.0
 
+[pallet_detector.filter_vertical]
+init_valid_num_min = 100
+init_row_valid_num_min = 40
+
+output_mode = 1
+search_direction = 1
+init_center_height_min = 0
+init_center_height_max = 60
+init_center_width_min = 130
+init_center_width_max = 230
+init_center_cx_min = -2.0
+init_center_cx_max = -1.5
+init_center_cy_min = -0.30000001192092896
+init_center_cy_max = 0.30000001192092896
+init_center_cz_min = 0.0
+init_center_cz_max = 0.20000000298023224
+init_center_jx_max = 0.009999999776482582
+init_center_jy_max = 0.0020000000949949026
+init_center_jz_max = 0.029999999329447746
+
+init_center_mean_window_len = 5
+init_center_mean_search_len = 6
+init_center_mean_window_jx_max = 0.01
+init_center_mean_window_jy_max = 0.01
+init_center_mean_window_jz_max = 0.01
+init_center_line_search_start_index = 10
+
+init_center_line_center_dist_max = 0.02
+init_center_line_length_min = 0.2
+
+init_center_line_filter_continuous_valid_resolution = 0.02
+init_center_line_filter_continuous_buffer_len = 0.8
+init_center_line_filter_continuous_len_min = 0.9
+init_center_line_filter_continuous_len_max = 1.1
+
+pallet_edge_z_min = 0.0
+pallet_edge_z_max = 0.0
+
+init_center_line_filter_dist = 0.03
+init_center_line_filter_len_step = 0.02
+init_center_line_filter_len_valid_min = 0.9
+init_center_line_filter_len_search_min = 0.2
+init_center_line_filter_len_search_max = 0.7
+init_center_line_filter_relative_row = 1
+init_center_line_filter_early_stop_num_change = 10
+
+[pallet_detector.filter_pallet]
+init_valid_num_min = 100
+init_row_valid_num_min = 40
+
+output_mode = 1
+search_direction = 1
+
+cluster_filter_split_last_dist = 0.04
+cluster_filter_split_start_dist = 0.06
+
+cluster_filter_split_last_z = 0.04
+cluster_filter_split_start_z = 0.06
+cluster_filter_split_last_x = 0.01
+cluster_filter_split_start_x = 0.02
+
+cluster_filter_split_last_yaw = 0.01
+cluster_filter_split_start_yaw = 0.03
+
+cluster_filter_num_min = 2
+
+pocket_relative_row_start = 10
+pocket_relative_row_end = 20
+
+cluster_filter_pose_weight = 0.001
+
+# filter pallet
+filter_pallet_row_high = -1
+filter_pallet_row_low = 40
+filter_pallet_x_min = -0.15000000596046448
+filter_pallet_x_max = 0.15000000596046448
+filter_pallet_y_min = -0.699999988079071
+filter_pallet_y_max = 0.699999988079071
+filter_pallet_z_min = -0.12
+filter_pallet_z_max = 0.07000000029802322
+filter_pallet_jx = 0.019999999552965164
+filter_pallet_jy = 0.009999999776482582
+filter_pallet_jz = 0.019999999552965164
+
+# check pocket and fork
+filter_pallet_z_pocket = -0.1
+# sensiteve to y error in initial pallet pose
+#fork_shape_width = 0.173
+fork_shape_width = 0.05
+#fork_pos_y = 0.2235
+fork_pos_y = 0.25
+
+fork_shape_height = 0.06
+#fork_shape_height = 0.03
+
+
+
+# filter space
+filter_space_continuous_dist = 0.01
+filter_space_continuous_num = 3
+filter_space_continuous_thresh = 0.05
+pallet_space_direction_diff_max = 0.03
+pallet_space_center_to_line_dist_max = 0.02
+pallet_pocket_empty_x = 0.2
+pallet_space_valid_num = 50
+
+
+# pallet shape
+fork_safe_center_dist = 0.08
+fork_width = 0.15
+fork_height = 0.1
+fork_len = 0.2
+fork_home_x = -0.1
+fork_home_z = -0.05
+
+
+pallet_space_width_left = 0.14
+pallet_pocket_width = 0.275
+pallet_space_width_center = 0.155
+pallet_space_height = 0.125
+pallet_top_height = 0.029
