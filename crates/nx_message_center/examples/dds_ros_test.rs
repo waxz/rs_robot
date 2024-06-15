@@ -1,5 +1,7 @@
 use nx_message_center::base::common_message::shared::HeaderString;
-use nx_message_center::base::{common_message, message_handler, tcc, tiny_alloc,pointcloud_process};
+use nx_message_center::base::{
+    common_message, message_handler, pointcloud_process, tcc, tiny_alloc,
+};
 use std::ffi::CStr;
 use std::ops::Deref;
 use std::os::raw::c_void;
@@ -45,8 +47,8 @@ fn main()
     let mut dds_handler: message_handler::MessageHandler =
         message_handler::MessageHandler::new("dds");
 
-    let mut detector_handler : pointcloud_process::perception::PointcloudPalletDetector
-        =pointcloud_process::perception::PointcloudPalletDetector::new() ;
+    let mut detector_handler: pointcloud_process::perception::PointcloudPalletDetector =
+        pointcloud_process::perception::PointcloudPalletDetector::new();
 
     ros_handler.create("a.toml", *allocator.cfg.get());
     dds_handler.create("a.toml", *allocator.cfg.get());

@@ -242,7 +242,7 @@ pub struct message_handler_t {
         unsafe extern "C" fn(
             h: *mut message_handler_t,
             channel_name: *const ::std::os::raw::c_char,
-            buffer: *mut *mut ::std::os::raw::c_void,
+            buffer: *mut *const ::std::os::raw::c_void,
             buffer_size: u32_t,
         ) -> ::std::os::raw::c_int,
     >,
@@ -2671,6 +2671,15 @@ extern "C" {
         roll: f32_t,
         pitch: f32_t,
         yaw: f32_t,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn pointcloud_mean_filter(
+        src_buffer: *mut f32_t,
+        point_num: u64_t,
+        dst_buffer: *mut f32_t,
+        count: *mut u32_t,
+        jump_max: f32_t,
     ) -> ::std::os::raw::c_int;
 }
 #[repr(C)]

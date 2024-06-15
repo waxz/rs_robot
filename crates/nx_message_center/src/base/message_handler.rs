@@ -38,7 +38,7 @@ impl MessageHandler
         }
     }
 
-    pub fn create(&mut self, filename: &str, ta_cfg: ta_cfg_t)->bool
+    pub fn create(&mut self, filename: &str, ta_cfg: ta_cfg_t) -> bool
     {
         let filename: CString = CString::new(filename).unwrap();
 
@@ -84,7 +84,7 @@ impl MessageHandler
             ptr.write_data.unwrap()(
                 ptr.deref() as *const _ as *mut _,
                 channel_name_ptr,
-                buffer.as_mut_ptr(),
+                buffer.as_mut_ptr() as *mut *const _,
                 buffer.len() as u32,
             )
         }
