@@ -1,0 +1,40 @@
+[package]
+name = "nx_app"
+version = "0.1.0"
+edition = "2021"
+#build = "build.rs"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+itertools = { version = "0.11.0" }
+#toml = "0.8.6"
+#signal-hook = "0.3.17"
+#num-traits = "0.2"
+#serde = { version ="1.0.190", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["local-time"] }
+tracing-appender = "0.2.0"
+rolling-file = "0.2.0"
+
+#rand = "0.8.5"
+clap = { version = "4.0", features = ["derive"] }
+#time = { version = "0.3.30" ,features = ["local-offset"]}
+time = { version = "0.3.30" , features = ["local-offset", "macros"] }
+rand = "0.8.5"
+
+
+
+#smooth-bevy-cameras = "0.11.0"
+
+
+
+toml = "0.8.6"
+
+
+
+# nx lib
+nx_common = {path = "../nx_common"}
+nx_message_center= {path = "../nx_message_center"}
+bytemuck = "1.15.0"
+serde = { version = "1.0.201", features = ["derive"] }
+log = "0.4.21"

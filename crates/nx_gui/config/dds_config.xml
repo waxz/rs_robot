@@ -280,7 +280,7 @@
                 <userTransports>
                     <transport_id>FILTER_UDPv4_TRANSPORT_DESCRIPTOR</transport_id>
                     <transport_id>FILTER_TCPv4_TRANSPORT_DESCRIPTOR</transport_id>
-                    <transport_id>shm_transport</transport_id>
+<!--                    <transport_id>shm_transport</transport_id>-->
                 </userTransports>
                 <useBuiltinTransports>false</useBuiltinTransports>
 <!--                <ignore_non_matching_locators>true</ignore_non_matching_locators>-->
@@ -315,27 +315,7 @@
                     <kind>BEST_EFFORT</kind>
                 </reliability>
                 <data_sharing>
-                    <kind>ON</kind>
-                    <shared_dir>/tmp/</shared_dir>
-                </data_sharing>
-                <durability>
-                    <kind>TRANSIENT_LOCAL</kind>
-                </durability>
-            </qos>
-            <topic>
-                <historyQos>
-                    <kind>KEEP_LAST</kind>
-                    <depth>10</depth>
-                </historyQos>
-            </topic>
-        </data_writer>
-        <data_reader profile_name="shm_subscriber_profile" is_default_profile="true">
-            <qos>
-                <reliability>
-                    <kind>BEST_EFFORT</kind>
-                </reliability>
-                <data_sharing>
-                    <kind>ON</kind>
+                    <kind>AUTO</kind>
                     <shared_dir>/tmp</shared_dir>
                 </data_sharing>
                 <durability>
@@ -348,6 +328,30 @@
                     <depth>10</depth>
                 </historyQos>
             </topic>
+            <historyMemoryPolicy>PREALLOCATED_WITH_REALLOC</historyMemoryPolicy>
+
+        </data_writer>
+        <data_reader profile_name="shm_reader_profile" is_default_profile="true">
+            <qos>
+                <reliability>
+                    <kind>BEST_EFFORT</kind>
+                </reliability>
+                <data_sharing>
+                    <kind>AUTO</kind>
+                    <shared_dir>/tmp</shared_dir>
+                </data_sharing>
+                <durability>
+                    <kind>TRANSIENT_LOCAL</kind>
+                </durability>
+            </qos>
+            <topic>
+                <historyQos>
+                    <kind>KEEP_LAST</kind>
+                    <depth>10</depth>
+                </historyQos>
+            </topic>
+            <historyMemoryPolicy>PREALLOCATED_WITH_REALLOC</historyMemoryPolicy>
+
         </data_reader>
 
 
@@ -363,7 +367,7 @@
             <qos>
                 <data_sharing>
                     <kind>AUTOMATIC</kind>
-                    <shared_dir>/tmp/</shared_dir>
+                    <shared_dir>/tmp</shared_dir>
                 </data_sharing>
             </qos>
         </data_reader>

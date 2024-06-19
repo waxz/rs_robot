@@ -1,12 +1,12 @@
 use nx_common::common::signal_handler::SignalHandler;
 use nx_common::common::thread::Thread;
-use nx_message_center::base::{common_message, message_handler, tiny_alloc,pointcloud_process};
+use nx_message_center::base::{common_message, message_handler, pointcloud_process, tiny_alloc};
 
 use nx_common::common::math::Point3f;
 
 use itertools::{izip, Itertools};
 use nx_common::common::types::UnsafeSender;
-use nx_message_center::base::common_message::shared::PointCloud2;
+use nx_message_center::base::common_message::shared::{HeaderString, PointCloud2};
 
 use std::f32::consts::{PI, TAU};
 use std::f64::consts::FRAC_PI_2;
@@ -14,6 +14,8 @@ use std::ffi::c_void;
 use std::io::Write;
 use std::ops::{BitAnd, Deref};
 use std::{fs, slice};
+use std::cell::RefCell;
+use std::rc::Rc;
 use time::{OffsetDateTime, UtcOffset};
 
 use bevy::app::{App, Startup, Update};
@@ -40,10 +42,11 @@ use nx_message_center::base::pointcloud_process::perception::{
     pointcloud_clip, pointcloud_transform,
 };
 use serde::{Deserialize, Serialize};
+use nx_common::common::task::TaskManager;
 
 //-------------
 
-const TA_BUFFER_SIZE: usize = 100000000;
+const TA_BUFFER_SIZE: usize = 200000000;
 static mut TA_BUFFER: [u8; TA_BUFFER_SIZE] = [0; TA_BUFFER_SIZE];
 
 #[derive(Parser, Debug)]
@@ -61,18 +64,17 @@ struct Args
 //------------------
 
 #[derive(Copy, Clone)]
-struct DetectionOperator{
-
+struct DetectionOperator
+{
     // 0: do nothing
     // 1: filter ground
     // 2: 1 + filter cargo
-    pub enable : bool,
+    pub enable: bool,
     pub detection_operator_mode: u32,
-    pub detection_operator_ret : u32,
-    pub filter_ground:GroundFilter,
-    pub filter_vertical:VerticalFilter,
+    pub detection_operator_ret: u32,
+    pub filter_ground: GroundFilter,
+    pub filter_vertical: VerticalFilter,
     pub filter_pallet: PalletFilter,
-
 }
 struct SimpleState
 {
@@ -92,15 +94,13 @@ struct SimpleState
     pub vertex_color_hsv_ratio: f32,
 
     // pub exit: bool,
-
     pub two_cluster_distance_index: [usize; 2],
     pub filter: CloudFilterConfig,
     pub operator_mode: u32,
     pub operator_run: bool,
-    pub calibration_enable :bool,
+    pub calibration_enable: bool,
 
-    pub detection_operator : DetectionOperator,
-
+    pub detection_operator: DetectionOperator,
 }
 
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
@@ -125,14 +125,15 @@ struct CloudFilterConfig
 {
     enable_mean_window: bool,
     mean_window_len: u32,
+    mean_window_jump_max: f32,
 
-    enable_dim: bool,//Option<bool>,
+    enable_dim: bool, //Option<bool>,
     filter_height_min: u64,
     filter_height_max: u64,
     filter_width_min: u64,
     filter_width_max: u64,
 
-    enable_range: bool,//Option<bool>,
+    enable_range: bool, //Option<bool>,
     filter_x_min: f32,
     filter_y_min: f32,
     filter_z_min: f32,
@@ -142,16 +143,17 @@ struct CloudFilterConfig
 }
 
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
-struct GroundFilter{
-    output_mode:u32,
+struct GroundFilter
+{
+    output_mode: u32,
 
     //
-    search_direction :u64,
+    search_direction: u64,
     // initial ground region
-    init_ground_height_min : u64,
-    init_ground_height_max : u64,
-    init_ground_width_min : u64,
-    init_ground_width_max : u64,
+    init_ground_height_min: u64,
+    init_ground_height_max: u64,
+    init_ground_width_min: u64,
+    init_ground_width_max: u64,
 
     // check initial ground is ground
     init_ground_cx_min: f32,
@@ -162,18 +164,16 @@ struct GroundFilter{
     init_ground_cz_max: f32,
 
     // ground region grow to intersect vertical region
-
     init_ground_nz_min: f32,
 
     // search region
-    ray_height_min : u64,
-    ray_height_max : u64,
-    ray_width_min : u64,
-    ray_width_max : u64,
-
+    ray_height_min: u64,
+    ray_height_max: u64,
+    ray_width_min: u64,
+    ray_width_max: u64,
 
     // detect vertical plane, pallet or cargo or wall, or outlier shadow
-    scan_width_step : u64,
+    scan_width_step: u64,
     // find stable center[cx,cy,cz],reject outlier
 
     // adaptive thresh
@@ -183,50 +183,62 @@ struct GroundFilter{
     adaptive_y_max: f32,
     adaptive_z_min: f32,
     adaptive_z_max: f32,
-    far_uncertain_z_max :f32,
-    far_uncertain_x_change_min : f32,
+    far_uncertain_z_max: f32,
+    far_uncertain_x_change_min: f32,
     far_uncertain_adaptive_z_max: f32,
-    far_uncertain_row : i32
-
+    far_uncertain_row: i32,
 }
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 
-struct PalletFilter{
-    output_mode:u32,
+struct PalletFilter
+{
+    output_mode: u32,
 
     //
-    search_direction :u64,
+    search_direction: u64,
 
     //
-    filter_pallet_row_high : i32,
-    filter_pallet_row_low : i32,
+    filter_pallet_row_high: i32,
+    filter_pallet_row_low: i32,
 
-filter_pallet_x_min: f32,
-filter_pallet_x_max: f32,
-filter_pallet_y_min: f32,
-filter_pallet_y_max: f32,
-filter_pallet_z_min: f32,
-filter_pallet_z_max: f32,
-filter_pallet_jx: f32,
-filter_pallet_jy: f32,
-filter_pallet_jz: f32,
+    filter_pallet_x_min: f32,
+    filter_pallet_x_max: f32,
+    filter_pallet_y_min: f32,
+    filter_pallet_y_max: f32,
+    filter_pallet_z_min: f32,
+    filter_pallet_z_max: f32,
+    filter_pallet_jx: f32,
+    filter_pallet_jy: f32,
+    filter_pallet_jz: f32,
 
+    //
+    filter_pallet_z_pocket: f32,
+    fork_shape_width: f32,
+    fork_pos_y: f32,
+    fork_shape_height: f32,
+    pallet_pocket_empty_x:f32,
+
+    pallet_space_width_left: f32,
+    pallet_pocket_width: f32,
+    pallet_space_width_center: f32,
+    pallet_space_height: f32,
+    pallet_top_height: f32,
 }
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 
-
-struct VerticalFilter{
-    output_mode:u32,
+struct VerticalFilter
+{
+    output_mode: u32,
 
     //
-    search_direction :u64,
+    search_direction: u64,
 
     // dim limut
     // range limit
-    init_center_height_min : u64,
-    init_center_height_max : u64,
-    init_center_width_min : u64,
-    init_center_width_max : u64,
+    init_center_height_min: u64,
+    init_center_height_max: u64,
+    init_center_width_min: u64,
+    init_center_width_max: u64,
     init_center_cx_min: f32,
     init_center_cx_max: f32,
     init_center_cy_min: f32,
@@ -236,7 +248,6 @@ struct VerticalFilter{
     init_center_jx_max: f32,
     init_center_jy_max: f32,
     init_center_jz_max: f32,
-
 }
 
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
@@ -252,8 +263,7 @@ struct GuiConfig
     cloud: CloudConfig,
     filter_ground: GroundFilter,
     filter_vertical: VerticalFilter,
-    filter_pallet:PalletFilter,
-
+    filter_pallet: PalletFilter,
 }
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 struct AppConfig
@@ -309,9 +319,9 @@ fn main()
     let tz_offset = nx_common::common::time::get_timezone_offset();
     let memory_pool_base = nx_common::common::memory::get_next_aligned_addr(
         unsafe { TA_BUFFER.as_ptr() } as *mut _,
-        8,
+        64,
     );
-    let allocator = tiny_alloc::TinyAlloc::new(memory_pool_base, TA_BUFFER_SIZE - 8, 512, 16, 8);
+    let allocator = tiny_alloc::TinyAlloc::new(memory_pool_base, TA_BUFFER_SIZE - 64, 1024, 512, 64);
 
     println!("what's up");
     let args = Args::parse();
@@ -346,9 +356,12 @@ fn main()
     let cloud_dim = app_config.pallet_detector.cloud.dim;
 
     let mut raw_float_vec =
-        allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+        allocator.alloc_as_array::<f32>((1 * 3) as usize);
+    let mut mean_filter_float_vec =
+        allocator.alloc_as_array::<f32>((1 * 3) as usize);
+
     let mut transform_float_vec =
-        allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+        allocator.alloc_as_array::<f32>((1* 3) as usize);
 
     {
         let raw_float_vec_ptr = raw_float_vec.as_ptr();
@@ -381,11 +394,11 @@ fn main()
                     vertex_color_hsv_ratio: 5.0,
                     // exit: false,
                     two_cluster_distance_index: [0; 2],
-                    filter:  app_config.pallet_detector.cloud.filter,
+                    filter: app_config.pallet_detector.cloud.filter,
                     operator_mode: 0,
                     operator_run: false,
                     calibration_enable: false,
-                    detection_operator: DetectionOperator{
+                    detection_operator: DetectionOperator {
                         detection_operator_mode: 0,
                         enable: false,
                         filter_ground: app_config.pallet_detector.filter_ground,
@@ -404,21 +417,22 @@ fn main()
         println!("set crate::GLOBAL_DATA::BUFFER");
     }
 
-    let mut dds_handler: message_handler::MessageHandler =
-        message_handler::MessageHandler::new("dds");
-    let ok = dds_handler.create(args.dds_config.as_str(), *allocator.cfg.get());
-
-    if !ok{
-        println!("exit");
-        return;
-    }
-    let mut pallet_detector_handler = pointcloud_process::perception::PointcloudPalletDetector::new();
-    let ok = pallet_detector_handler.create(args.dds_config.as_str(), *allocator.cfg.get());
-
-    if !ok{
-        println!("exit");
-        return;
-    }
+    // let mut dds_handler: message_handler::MessageHandler =
+    //     message_handler::MessageHandler::new("dds");
+    // let ok = dds_handler.create(args.dds_config.as_str(), *allocator.cfg.get());
+    //
+    // if !ok {
+    //     println!("exit");
+    //     return;
+    // }
+    // let mut pallet_detector_handler =
+    //     pointcloud_process::perception::PointcloudPalletDetector::new();
+    // let ok = pallet_detector_handler.create(args.dds_config.as_str(), *allocator.cfg.get());
+    //
+    // if !ok {
+    //     println!("exit");
+    //     return;
+    // }
 
     let mut signal = SignalHandler::default();
 
@@ -435,9 +449,23 @@ fn main()
 
     let mut dds_thread = Thread::default();
 
+    #[cfg(not_use_this_thread)]
     {
+        let mut mean_window_filter_max = app_config.pallet_detector.cloud.filter.mean_window_len;
+        let mut enable_mean_window = app_config.pallet_detector.cloud.filter.enable_mean_window;
+        let mut mean_window_filter_count = 0u32;
+        let mut mean_window_filter_count_reach = !enable_mean_window;
+        let mean_window_jump_max = app_config.pallet_detector.cloud.filter.mean_window_jump_max;
+
         let signal = signal.clone();
         dds_thread = Thread::new(move || {
+
+
+
+
+
+
+
             while signal.is_run() {
                 let enable_dds_update = GLOBAL_DATA
                     .get()
@@ -453,14 +481,21 @@ fn main()
                     .lock()
                     .unwrap()
                     .dds_msg_count;
-                let mut cloud_height_width = [0,0];
+                let mut cloud_height_width = [0, 0];
 
-                let mut detection_operator = GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator;
+                let mut detection_operator = GLOBAL_DATA
+                    .get()
+                    .unwrap()
+                    .state
+                    .lock()
+                    .unwrap()
+                    .detection_operator;
 
-                if enable_dds_update || dds_msg_count == 0 {
+                if
+                enable_dds_update ||
+                    dds_msg_count == 0 {
                     let recv_cloud = dds_handler.read_data(c"cloud_sub");
                     for m in recv_cloud.iter() {
-                        dds_msg_count += 1;
                         let data: PointCloud2 = PointCloud2::from_ptr(*m);
 
                         let timestamp_u64 = data.get_stamp();
@@ -501,24 +536,94 @@ fn main()
                                 transform_float_vec,
                                 float_vec_len as usize,
                             );
+                            mean_filter_float_vec = allocator.realloc_as_array::<f32>(
+                                mean_filter_float_vec,
+                                float_vec_len as usize,
+                            );
+
+                            if (enable_mean_window) {
+                                pointcloud_clip(
+                                    cloud_float_vec.as_ptr() as *mut _,
+                                    cloud_height_width[0] as u64,
+                                    cloud_height_width[1] as u64,
+                                    mean_filter_float_vec.as_mut_ptr(),
+                                    filter.filter_height_min,
+                                    filter.filter_height_max,
+                                    filter.filter_width_min,
+                                    filter.filter_width_max,
+                                );
+
+                                pointcloud_process::perception::pointcloud_mean_filter(
+                                    mean_filter_float_vec.as_mut_ptr(),
+                                    float_vec_len / 3,
+                                    raw_float_vec.as_mut_ptr(),
+                                    &mut mean_window_filter_count,
+                                    mean_window_jump_max,
+                                );
+
+                                #[cfg(bypass_filter)]
+                                {
+                                    let w0 = mean_window_filter_count as f32;
+
+                                    let w1 = (w0) / (w0 + 1.0);
+                                    let w2 = 1.0 - w1;
+
+                                    if (mean_window_filter_count == 0) {
+                                        unsafe {
+                                            std::ptr::copy(
+                                                mean_filter_float_vec.as_ptr(),
+                                                raw_float_vec.as_mut_ptr(),
+                                                mean_filter_float_vec.len(),
+                                            );
+                                        }
+                                    } else {
+                                        for (i, j) in izip!(
+                                            mean_filter_float_vec.iter_mut(),
+                                            raw_float_vec.iter_mut()
+                                        ) {
+                                            *j = *j * w1 + *i * w2;
+                                        }
+                                    }
+                                    mean_window_filter_count += 1;
+                                }
+
+                                mean_window_filter_count_reach =
+                                    mean_window_filter_count == mean_window_filter_max;
+
+                                if mean_window_filter_count_reach {
+                                    mean_window_filter_count = 0;
+                                }
+                            } else {
+                                pointcloud_clip(
+                                    cloud_float_vec.as_ptr() as *mut _,
+                                    cloud_height_width[0] as u64,
+                                    cloud_height_width[1] as u64,
+                                    raw_float_vec.as_mut_ptr(),
+                                    filter.filter_height_min,
+                                    filter.filter_height_max,
+                                    filter.filter_width_min,
+                                    filter.filter_width_max,
+                                );
+                            }
+                            GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .cloud_buffer
+                                .lock()
+                                .unwrap()
+                                .raw_buffer = UnsafeSender::new(raw_float_vec.as_ptr());
+                            // GLOBAL_DATA
+                            //     .get()
+                            //     .unwrap()
+                            //     .cloud_buffer
+                            //     .lock()
+                            //     .unwrap()
+                            //     .float_num = raw_float_vec.len();
 
                             // info!("clip cloud to float_vec_len {} ", float_vec_len);
                             // use nx_message_center::base::pointcloud_process::perception::pointcloud_clip;
-                            pointcloud_clip(
-                                cloud_float_vec.as_ptr() as *mut _,
-                                cloud_height_width[0] as u64,
-                                cloud_height_width[1] as u64,
-                                raw_float_vec.as_mut_ptr(),
-                                filter.filter_height_min,
-                                filter.filter_height_max,
-                                filter.filter_width_min,
-                                filter.filter_width_max,
-                            );
 
                             {
-                                GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().raw_buffer = UnsafeSender::new(raw_float_vec.as_ptr());
-                                GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().float_num = raw_float_vec.len();
-
 
                                 // *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
                                 //     CloudFloatVecBuffer {
@@ -529,8 +634,6 @@ fn main()
                                 //         render_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
                                 //         float_num: raw_float_vec.len(),
                                 //     };
-
-
                             }
                         } else {
                             raw_float_vec = allocator
@@ -540,18 +643,85 @@ fn main()
                                 transform_float_vec,
                                 cloud_float_vec.len(),
                             );
+                            mean_filter_float_vec = allocator.realloc_as_array::<f32>(
+                                mean_filter_float_vec,
+                                cloud_float_vec.len(),
+                            );
 
-                            unsafe {
-                                std::ptr::copy(
-                                    cloud_float_vec.as_ptr(),
+                            let float_vec_len = cloud_float_vec.len() as u64;
+
+                            if enable_mean_window {
+                                unsafe {
+                                    std::ptr::copy(
+                                        cloud_float_vec.as_ptr(),
+                                        mean_filter_float_vec.as_mut_ptr(),
+                                        cloud_float_vec.len(),
+                                    );
+                                }
+
+                                pointcloud_process::perception::pointcloud_mean_filter(
+                                    mean_filter_float_vec.as_mut_ptr(),
+                                    float_vec_len / 3,
                                     raw_float_vec.as_mut_ptr(),
-                                    cloud_float_vec.len(),
+                                    &mut mean_window_filter_count,
+                                    mean_window_jump_max,
                                 );
-                            }
 
-                            {
-                                GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().raw_buffer = UnsafeSender::new(raw_float_vec.as_ptr());
-                                GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap().float_num = raw_float_vec.len();
+                                #[cfg(bypass_filter)]
+                                {
+                                    let w0 = mean_window_filter_count as f32;
+
+                                    let w1 = (w0) / (w0 + 1.0);
+                                    let w2 = 1.0 - w1;
+
+                                    if (mean_window_filter_count == 0) {
+                                        unsafe {
+                                            std::ptr::copy(
+                                                mean_filter_float_vec.as_ptr(),
+                                                raw_float_vec.as_mut_ptr(),
+                                                mean_filter_float_vec.len(),
+                                            );
+                                        }
+                                    } else {
+                                        for (i, j) in izip!(
+                                            mean_filter_float_vec.iter_mut(),
+                                            raw_float_vec.iter_mut()
+                                        ) {
+                                            *j = *j * w1 + *i * w2;
+                                        }
+                                    }
+                                    mean_window_filter_count += 1;
+                                }
+
+                                mean_window_filter_count_reach =
+                                    mean_window_filter_count == mean_window_filter_max;
+
+                                if mean_window_filter_count_reach {
+                                    mean_window_filter_count = 0;
+                                }
+
+                                GLOBAL_DATA
+                                    .get()
+                                    .unwrap()
+                                    .cloud_buffer
+                                    .lock()
+                                    .unwrap()
+                                    .raw_buffer = UnsafeSender::new(raw_float_vec.as_ptr());
+                                // GLOBAL_DATA
+                                //     .get()
+                                //     .unwrap()
+                                //     .cloud_buffer
+                                //     .lock()
+                                //     .unwrap()
+                                //     .float_num = mean_filter_float_vec.len();
+                            } else {
+                                unsafe {
+                                    std::ptr::copy(
+                                        cloud_float_vec.as_ptr(),
+                                        raw_float_vec.as_mut_ptr(),
+                                        cloud_float_vec.len(),
+                                    );
+                                }
 
                                 // *GLOBAL_DATA.get().unwrap().cloud_buffer.lock().unwrap() =
                                 //     CloudFloatVecBuffer {
@@ -562,9 +732,24 @@ fn main()
                                 //         render_buffer: UnsafeSender::new(transform_float_vec.as_ptr()),
                                 //         float_num: raw_float_vec.len(),
                                 //     };
-
                             }
+                            GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .cloud_buffer
+                                .lock()
+                                .unwrap()
+                                .raw_buffer = UnsafeSender::new(raw_float_vec.as_ptr());
+                            // GLOBAL_DATA
+                            //     .get()
+                            //     .unwrap()
+                            //     .cloud_buffer
+                            //     .lock()
+                            //     .unwrap()
+                            //     .float_num = raw_float_vec.len();
                         }
+
+                        dds_msg_count += 1;
                     }
                 }
                 GLOBAL_DATA
@@ -578,7 +763,7 @@ fn main()
                 let extrinsic = *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
 
                 {
-                    if dds_msg_count > 0 {
+                    if dds_msg_count > 0 && mean_window_filter_count_reach {
                         if let Ok(ref mut mutex) =
                             GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
                         {
@@ -602,12 +787,8 @@ fn main()
                         }
                     }
                 }
-                if(!detection_operator.enable)
-                {
-
+                if (mean_window_filter_count_reach) {
                     if (dds_msg_count > 0 && extrinsic.enable) {
-
-
                         let transform_buffer = GLOBAL_DATA
                             .get()
                             .unwrap()
@@ -616,13 +797,25 @@ fn main()
                             .unwrap()
                             .transform_buffer;
 
-                        GLOBAL_DATA
-                            .get()
-                            .unwrap()
-                            .cloud_buffer
-                            .lock()
-                            .unwrap()
-                            .render_buffer = transform_buffer;
+                        if(!detection_operator.enable ){
+
+                            GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .cloud_buffer
+                                .lock()
+                                .unwrap()
+                                .render_buffer = transform_buffer;
+
+                            GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .cloud_buffer
+                                .lock()
+                                .unwrap()
+                                .float_num = transform_float_vec.len();
+
+                        }
                         // info!("render_buffer=transform_buffer extrinsic: {:?}", extrinsic);
                     } else {
                         let raw_buffer = GLOBAL_DATA
@@ -632,39 +825,43 @@ fn main()
                             .lock()
                             .unwrap()
                             .raw_buffer;
-                        GLOBAL_DATA
-                            .get()
-                            .unwrap()
-                            .cloud_buffer
-                            .lock()
-                            .unwrap()
-                            .render_buffer = raw_buffer;
+                        if(!detection_operator.enable ){
+
+                            GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .cloud_buffer
+                                .lock()
+                                .unwrap()
+                                .render_buffer = raw_buffer;
+                            GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .cloud_buffer
+                                .lock()
+                                .unwrap()
+                                .float_num = transform_float_vec.len();
+                        }
                         // info!("render_buffer=raw_buffer")
                     }
                 }
 
-
-                if dds_msg_count > 0{
-
-
-                    if detection_operator.enable{
-
-
+                if dds_msg_count > 0 && mean_window_filter_count_reach {
+                    if detection_operator.enable {
                         let filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
 
-                        let [cloud_height, cloud_width] = if filter.enable_dim{
-                            [(filter.filter_height_max
-                                - filter.filter_height_min)
-                                ,  (filter.filter_width_max - filter.filter_width_min)]
-                        }else{
+                        let [cloud_height, cloud_width] = if filter.enable_dim {
+                            [
+                                (filter.filter_height_max - filter.filter_height_min),
+                                (filter.filter_width_max - filter.filter_width_min),
+                            ]
+                        } else {
                             [cloud_height_width[0] as u64, cloud_height_width[1] as u64]
                         };
-                        let [vx, vy,vz] = if extrinsic.enable{
-                            [extrinsic.pose.tx,
-                                extrinsic.pose.ty,
-                                extrinsic.pose.tz]
-                        }else{
-                            [0.0,0.0,0.0]
+                        let [vx, vy, vz] = if extrinsic.enable {
+                            [extrinsic.pose.tx, extrinsic.pose.ty, extrinsic.pose.tz]
+                        } else {
+                            [0.0, 0.0, 0.0]
                         };
 
                         let transform_buffer = GLOBAL_DATA
@@ -674,52 +871,92 @@ fn main()
                             .lock()
                             .unwrap()
                             .transform_buffer;
-                        if( detection_operator.detection_operator_mode  > 0){
+                        if (detection_operator.detection_operator_mode > 0) {
                             // set input
-                            pallet_detector_handler.set_input(*transform_buffer.get() as *mut _,cloud_height,cloud_width, vx, vy, vz );
+                            pallet_detector_handler.set_input(
+                                *transform_buffer.get() as *mut _,
+                                cloud_height,
+                                cloud_width,
+                                vx,
+                                vy,
+                                vz,
+                            );
 
                             // set ground init dim
-                            pallet_detector_handler.set_ground_init_thresh( detection_operator.filter_ground.init_ground_cx_min,detection_operator.filter_ground.init_ground_cx_max,
-                                                                            detection_operator.filter_ground.init_ground_cy_min,detection_operator.filter_ground.init_ground_cy_max,
-                                                                            detection_operator.filter_ground.init_ground_cz_min,detection_operator.filter_ground.init_ground_cz_max,
-                                                                            detection_operator.filter_ground.init_ground_nz_min
-
+                            pallet_detector_handler.set_ground_init_thresh(
+                                detection_operator.filter_ground.init_ground_cx_min,
+                                detection_operator.filter_ground.init_ground_cx_max,
+                                detection_operator.filter_ground.init_ground_cy_min,
+                                detection_operator.filter_ground.init_ground_cy_max,
+                                detection_operator.filter_ground.init_ground_cz_min,
+                                detection_operator.filter_ground.init_ground_cz_max,
+                                detection_operator.filter_ground.init_ground_nz_min,
                             );
                             pallet_detector_handler.set_ground_adaptive_thresh(
-                                detection_operator.filter_ground.adaptive_x_min, detection_operator.filter_ground.adaptive_x_max,
-                                detection_operator.filter_ground.adaptive_y_min, detection_operator.filter_ground.adaptive_y_max,
-                                detection_operator.filter_ground.adaptive_z_min, detection_operator.filter_ground.adaptive_z_max,
-
+                                detection_operator.filter_ground.adaptive_x_min,
+                                detection_operator.filter_ground.adaptive_x_max,
+                                detection_operator.filter_ground.adaptive_y_min,
+                                detection_operator.filter_ground.adaptive_y_max,
+                                detection_operator.filter_ground.adaptive_z_min,
+                                detection_operator.filter_ground.adaptive_z_max,
                             );
 
-                            pallet_detector_handler.set_ground_uncertain_thresh(detection_operator.filter_ground.far_uncertain_z_max, detection_operator.filter_ground.far_uncertain_x_change_min, detection_operator.filter_ground.far_uncertain_adaptive_z_max, detection_operator.filter_ground.far_uncertain_row);
+                            pallet_detector_handler.set_ground_uncertain_thresh(
+                                detection_operator.filter_ground.far_uncertain_z_max,
+                                detection_operator.filter_ground.far_uncertain_x_change_min,
+                                detection_operator
+                                    .filter_ground
+                                    .far_uncertain_adaptive_z_max,
+                                detection_operator.filter_ground.far_uncertain_row,
+                            );
 
-                            pallet_detector_handler.set_ground_init_dim(detection_operator.filter_ground.init_ground_height_min,detection_operator.filter_ground.init_ground_height_max,
-                                                                        detection_operator.filter_ground.init_ground_width_min,detection_operator.filter_ground.init_ground_width_max);
+                            pallet_detector_handler.set_ground_init_dim(
+                                detection_operator.filter_ground.init_ground_height_min,
+                                detection_operator.filter_ground.init_ground_height_max,
+                                detection_operator.filter_ground.init_ground_width_min,
+                                detection_operator.filter_ground.init_ground_width_max,
+                            );
                             // call filter
-                            pallet_detector_handler.set_vertical_init_dim(detection_operator.filter_vertical.init_center_height_min,detection_operator.filter_vertical.init_center_height_max,
-                                                                          detection_operator.filter_vertical.init_center_width_min, detection_operator.filter_vertical.init_center_width_max);
-
-                            pallet_detector_handler.set_vertical_init_thresh(detection_operator.filter_vertical.init_center_cx_min,detection_operator.filter_vertical.init_center_cx_max,
-                                                                             detection_operator.filter_vertical.init_center_cy_min,detection_operator.filter_vertical.init_center_cy_max,
-                                                                             detection_operator.filter_vertical.init_center_cz_min,detection_operator.filter_vertical.init_center_cz_max,
-                                                                             detection_operator.filter_vertical.init_center_jx_max,detection_operator.filter_vertical.init_center_jy_max,
-                                                                             detection_operator.filter_vertical.init_center_jz_max
+                            pallet_detector_handler.set_vertical_init_dim(
+                                detection_operator.filter_vertical.init_center_height_min,
+                                detection_operator.filter_vertical.init_center_height_max,
+                                detection_operator.filter_vertical.init_center_width_min,
+                                detection_operator.filter_vertical.init_center_width_max,
                             );
-                            pallet_detector_handler.set_pallet_row(detection_operator.filter_pallet.filter_pallet_row_high,detection_operator.filter_pallet.filter_pallet_row_low );
-                            pallet_detector_handler.set_pallet_thresh(detection_operator.filter_pallet.filter_pallet_x_min,detection_operator.filter_pallet.filter_pallet_x_max,
-                                                                      detection_operator.filter_pallet.filter_pallet_y_min,detection_operator.filter_pallet.filter_pallet_y_max,
-                                                                      detection_operator.filter_pallet.filter_pallet_z_min,detection_operator.filter_pallet.filter_pallet_z_max,
-                                                                      detection_operator.filter_pallet.filter_pallet_jx,detection_operator.filter_pallet.filter_pallet_jy,
-                                                                      detection_operator.filter_pallet.filter_pallet_jz
+
+                            pallet_detector_handler.set_vertical_init_thresh(
+                                detection_operator.filter_vertical.init_center_cx_min,
+                                detection_operator.filter_vertical.init_center_cx_max,
+                                detection_operator.filter_vertical.init_center_cy_min,
+                                detection_operator.filter_vertical.init_center_cy_max,
+                                detection_operator.filter_vertical.init_center_cz_min,
+                                detection_operator.filter_vertical.init_center_cz_max,
+                                detection_operator.filter_vertical.init_center_jx_max,
+                                detection_operator.filter_vertical.init_center_jy_max,
+                                detection_operator.filter_vertical.init_center_jz_max,
+                            );
+                            pallet_detector_handler.set_pallet_row(
+                                detection_operator.filter_pallet.filter_pallet_row_high,
+                                detection_operator.filter_pallet.filter_pallet_row_low,
+                            );
+                            pallet_detector_handler.set_pallet_thresh(
+                                detection_operator.filter_pallet.filter_pallet_x_min,
+                                detection_operator.filter_pallet.filter_pallet_x_max,
+                                detection_operator.filter_pallet.filter_pallet_y_min,
+                                detection_operator.filter_pallet.filter_pallet_y_max,
+                                detection_operator.filter_pallet.filter_pallet_z_min,
+                                detection_operator.filter_pallet.filter_pallet_z_max,
+                                detection_operator.filter_pallet.filter_pallet_jx,
+                                detection_operator.filter_pallet.filter_pallet_jy,
+                                detection_operator.filter_pallet.filter_pallet_jz,
                             );
                         }
 
-
-                        if detection_operator.detection_operator_mode == 1{
-                            println!("detection_operator.filter_ground : {:?}",detection_operator.filter_ground);
-
-
+                        if detection_operator.detection_operator_mode == 1 {
+                            println!(
+                                "detection_operator.filter_ground : {:?}",
+                                detection_operator.filter_ground
+                            );
 
                             if let Ok(ref mut mutex) =
                                 GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
@@ -731,25 +968,28 @@ fn main()
                                     ref mut float_num,
                                 } = **mutex;
 
-                                let mut ret = pallet_detector_handler.filter_ground(detection_operator.filter_ground.output_mode );
-                                let (process_buffer,  process_float_num) = ret;
+                                let mut ret = pallet_detector_handler
+                                    .filter_ground(detection_operator.filter_ground.output_mode);
+                                let (process_buffer, process_float_num) = ret;
 
-                                if ! process_buffer.is_null() && process_float_num > 0 {
+                                if !process_buffer.is_null() && process_float_num > 0 {
+                                    *render_buffer = UnsafeSender::new(process_buffer);
 
-                                     *render_buffer = UnsafeSender::new(process_buffer);
-
-                                     *float_num = process_float_num as usize;
+                                    *float_num = process_float_num as usize;
                                     println!("set cloud_buffer render_buffer to process_buffer ");
                                 }
                             }
                         }
 
-
-                        if detection_operator.detection_operator_mode == 2{
-                            println!("detection_operator.filter_ground : {:?}",detection_operator.filter_ground);
-                            println!("detection_operator.filter_vertical : {:?}",detection_operator.filter_vertical);
-
-
+                        if detection_operator.detection_operator_mode == 2 {
+                            println!(
+                                "detection_operator.filter_ground : {:?}",
+                                detection_operator.filter_ground
+                            );
+                            println!(
+                                "detection_operator.filter_vertical : {:?}",
+                                detection_operator.filter_vertical
+                            );
 
                             if let Ok(ref mut mutex) =
                                 GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
@@ -761,13 +1001,55 @@ fn main()
                                     ref mut float_num,
                                 } = **mutex;
 
-                                let mut ret = pallet_detector_handler.filter_ground(detection_operator.filter_ground.output_mode );
-                                ret = pallet_detector_handler.filter_vertical(detection_operator.filter_vertical.output_mode );
+                                let mut ret = pallet_detector_handler
+                                    .filter_ground(detection_operator.filter_ground.output_mode);
+                                ret = pallet_detector_handler.filter_vertical(
+                                    detection_operator.filter_vertical.output_mode,
+                                );
 
-                                let (process_buffer,  process_float_num) = ret;
+                                let (process_buffer, process_float_num) = ret;
 
-                                if ! process_buffer.is_null() && process_float_num > 0 {
+                                if !process_buffer.is_null() && process_float_num > 0 {
+                                    *render_buffer = UnsafeSender::new(process_buffer);
 
+                                    *float_num = process_float_num as usize;
+                                    println!("set cloud_buffer render_buffer to process_buffer ");
+                                }
+                            }
+                        }
+
+                        if detection_operator.detection_operator_mode == 3 {
+                            println!(
+                                "detection_operator.filter_ground : {:?}",
+                                detection_operator.filter_ground
+                            );
+                            println!(
+                                "detection_operator.filter_vertical : {:?}",
+                                detection_operator.filter_vertical
+                            );
+
+                            if let Ok(ref mut mutex) =
+                                GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
+                            {
+                                let CloudFloatVecBuffer {
+                                    raw_buffer,
+                                    transform_buffer,
+                                    ref mut render_buffer,
+                                    ref mut float_num,
+                                } = **mutex;
+
+                                let mut ret = pallet_detector_handler
+                                    .filter_ground(detection_operator.filter_ground.output_mode);
+                                ret = pallet_detector_handler.filter_vertical(
+                                    detection_operator.filter_vertical.output_mode,
+                                );
+
+                                ret = pallet_detector_handler
+                                    .filter_pallet(detection_operator.filter_pallet.output_mode);
+
+                                let (process_buffer, process_float_num) = ret;
+
+                                if !process_buffer.is_null() && process_float_num > 0 {
                                     *render_buffer = UnsafeSender::new(process_buffer);
 
                                     *float_num = process_float_num as usize;
@@ -777,46 +1059,29 @@ fn main()
                         }
 
 
-                        if detection_operator.detection_operator_mode == 3{
-                            println!("detection_operator.filter_ground : {:?}",detection_operator.filter_ground);
-                            println!("detection_operator.filter_vertical : {:?}",detection_operator.filter_vertical);
-
-
-
+                        if detection_operator.detection_operator_mode == 4{
                             if let Ok(ref mut mutex) =
-                                GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
-                            {
-                                let CloudFloatVecBuffer {
-                                    raw_buffer,
-                                    transform_buffer,
-                                    ref mut render_buffer,
-                                    ref mut float_num,
-                                } = **mutex;
+                                GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock(){
 
-                                let mut ret = pallet_detector_handler.filter_ground(detection_operator.filter_ground.output_mode );
-                                ret = pallet_detector_handler.filter_vertical(detection_operator.filter_vertical.output_mode );
+                                pallet_detector_handler.filter_ground(1);
+                                pallet_detector_handler.filter_vertical(1);
+                                pallet_detector_handler.filter_pallet(30);
 
-                                ret = pallet_detector_handler.filter_pallet(detection_operator.filter_pallet.output_mode);
 
-                                let (process_buffer,  process_float_num) = ret;
 
-                                if ! process_buffer.is_null() && process_float_num > 0 {
 
-                                    *render_buffer = UnsafeSender::new(process_buffer);
-
-                                    *float_num = process_float_num as usize;
-                                    println!("set cloud_buffer render_buffer to process_buffer ");
-                                }
                             }
-
                         }
-
 
                         // detection_operator.detection_operator_mode = 0;
-
                     }
-                    GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator = detection_operator;
-
+                    GLOBAL_DATA
+                        .get()
+                        .unwrap()
+                        .state
+                        .lock()
+                        .unwrap()
+                        .detection_operator = detection_operator;
                 }
 
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -829,16 +1094,403 @@ fn main()
         });
     }
 
+
+    {
+        let signal = signal.clone();
+
+        let app_config = app_config.clone();
+        dds_thread = Thread::new(
+
+            move|| {
+
+                let cloud_dim = app_config.pallet_detector.cloud.dim;
+
+                let mut raw_float_vec =
+                    allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+                let mut mean_filter_float_vec =
+                    allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+
+                let mut transform_float_vec =
+                    allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+
+
+                let mut task_manager = TaskManager::new(20,20.0,0);
+
+                let mut dds_handler=
+                    Rc::new(RefCell::new(  message_handler::MessageHandler::new("dds")))
+                    ;
+                let ok = dds_handler.borrow_mut().create(args.dds_config.as_str(), *allocator.cfg.get());
+                if !ok {
+                    println!("exit");
+                    return;
+                }
+                let mut pallet_detector_handler =
+                    Rc::new(RefCell::new(pointcloud_process::perception::PointcloudPalletDetector::new() )) ;
+
+                let ok = pallet_detector_handler.borrow_mut().create(args.dds_config.as_str(), *allocator.cfg.get());
+
+                if !ok {
+                    println!("exit");
+                    return;
+                }
+
+
+                //
+                let cloud_dim = app_config.pallet_detector.cloud.dim;
+                let mut mean_window_filter_max = app_config.pallet_detector.cloud.filter.mean_window_len;
+                let mut enable_mean_window = app_config.pallet_detector.cloud.filter.enable_mean_window;
+                let mut mean_window_filter_count = 0u32;
+                let mut mean_window_filter_count_reach = !enable_mean_window;
+
+                let mut start_detect_cmd = Rc::new(RefCell::new(true));
+                let mut new_cloud_ready =  Rc::new(RefCell::new(false));
+
+                let mean_window_jump_max = app_config.pallet_detector.cloud.filter.mean_window_jump_max;
+
+                {
+
+
+                    let dds_handler = dds_handler.clone();
+
+                    task_manager.add("recv_msg", move|| {
+
+                        //---- recv cmd
+                        let mut binding = dds_handler.borrow_mut();
+                        let recv_cmd = binding.read_data(c"detector_cmd_sub");
+                        for m in recv_cmd.iter(){
+                            let msg: HeaderString = HeaderString::from_ptr(*m);
+                            let timestamp_u64 = msg.get_stamp();
+                            let stamp = nx_common::common::time::get_local_from_ns(timestamp_u64 as i128);
+
+
+                            let data = msg.get_data();
+                            println!("recv_cmd, stamp: {}, data: {:?}",stamp, data);
+
+
+
+                        }
+                        true
+                    },100.0);
+                }
+
+                //
+                {
+
+
+                    let dds_handler = dds_handler.clone();
+                    let mut pallet_detector_handler = pallet_detector_handler.clone();
+                    let start_detect_cmd = start_detect_cmd.clone();
+                    let new_cloud_ready = new_cloud_ready.clone();
+
+
+                    task_manager.add("recv_cloud", move|| {
+
+                        let filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
+                        let extrinsic = *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
+
+                        //---- recv cmd
+                        let mut binding = dds_handler.borrow_mut();
+                        let recv_cloud = binding.read_data(c"cloud_sub");
+
+
+                        for m in recv_cloud.iter(){
+                            let data: PointCloud2 = PointCloud2::from_ptr(*m);
+
+                            let timestamp_u64 = data.get_stamp();
+                            let stamp =
+                                OffsetDateTime::from_unix_timestamp_nanos(timestamp_u64 as i128)
+                                    .unwrap();
+                            let stamp = nx_common::common::time::get_local_from_ns(timestamp_u64 as i128);
+
+                            println!("recv cloud: stamp: {}",stamp);
+
+                            let current_stamp = OffsetDateTime::now_utc();
+
+                            let stamp_diff = current_stamp - stamp;
+
+                            let stamp_diff_s = stamp_diff.as_seconds_f32();
+                            let stamp_local = stamp.to_offset(tz_offset);
+                            let stamp_valid = (stamp_diff_s.abs() < 1.0);
+
+                            let frame_id = data.get_frame_id();
+                            let cloud_float_vec = data.get_data();
+
+                            let cloud_height_width = data.get_height_width();
+
+
+                            let cloud_dim_height = filter.filter_height_max
+                                - filter.filter_height_min;
+
+                            let cloud_dim_width = (filter.filter_width_max - filter.filter_width_min);
+                            let float_vec_len = cloud_dim_height
+                                * cloud_dim_width
+                                * 3;
+                            raw_float_vec = allocator
+                                .realloc_as_array::<f32>(raw_float_vec, float_vec_len as usize);
+                            transform_float_vec = allocator.realloc_as_array::<f32>(
+                                transform_float_vec,
+                                float_vec_len as usize,
+                            );
+                            mean_filter_float_vec = allocator.realloc_as_array::<f32>(
+                                mean_filter_float_vec,
+                                float_vec_len as usize,
+                            );
+                            if (enable_mean_window){
+                                pointcloud_clip(
+                                    cloud_float_vec.as_ptr() as *mut _,
+                                    cloud_height_width[0] as u64,
+                                    cloud_height_width[1] as u64,
+                                    mean_filter_float_vec.as_mut_ptr(),
+                                    filter.filter_height_min,
+                                    filter.filter_height_max,
+                                    filter.filter_width_min,
+                                    filter.filter_width_max,
+                                );
+
+                                pointcloud_process::perception::pointcloud_mean_filter(
+                                    mean_filter_float_vec.as_mut_ptr(),
+                                    float_vec_len / 3,
+                                    raw_float_vec.as_mut_ptr(),
+                                    &mut mean_window_filter_count,
+                                    mean_window_jump_max,
+                                );
+                                mean_window_filter_count_reach =
+                                    mean_window_filter_count == mean_window_filter_max;
+
+                                if mean_window_filter_count_reach {
+                                    mean_window_filter_count = 0;
+                                }
+
+                            }else{
+                                pointcloud_clip(
+                                    cloud_float_vec.as_ptr() as *mut _,
+                                    cloud_height_width[0] as u64,
+                                    cloud_height_width[1] as u64,
+                                    raw_float_vec.as_mut_ptr(),
+                                    filter.filter_height_min,
+                                    filter.filter_height_max,
+                                    filter.filter_width_min,
+                                    filter.filter_width_max,
+                                );
+                                mean_window_filter_count_reach = true;
+                            }
+
+                            if(mean_window_filter_count_reach){
+                                *new_cloud_ready.borrow_mut() = true;
+
+                                pointcloud_transform(
+                                    raw_float_vec.as_mut_ptr() ,
+                                    (raw_float_vec.len() as u64) / 3,
+                                    transform_float_vec.as_mut_ptr() ,
+                                    extrinsic.pose.tx,
+                                    extrinsic.pose.ty,
+                                    extrinsic.pose.tz,
+                                    extrinsic.pose.roll,
+                                    extrinsic.pose.pitch,
+                                    extrinsic.pose.yaw,
+                                );
+
+                                pallet_detector_handler.borrow_mut().set_input(
+                                    transform_float_vec.as_mut_ptr(),
+                                    cloud_dim_height,
+                                    cloud_dim_width,
+                                    extrinsic.pose.tx,
+                                    extrinsic.pose.ty,
+                                    extrinsic.pose.tz,
+                                );
+
+
+
+
+
+                            }
+
+
+                        }
+
+                        true
+                    },100.0);
+                }
+
+                {
+                    let dds_handler = dds_handler.clone();
+                    let mut pallet_detector_handler = pallet_detector_handler.clone();
+
+                    let start_detect_cmd = start_detect_cmd.clone();
+                    let new_cloud_ready = new_cloud_ready.clone();
+
+                    task_manager.add("detect", move||{
+
+                        if *start_detect_cmd.borrow() && *new_cloud_ready.borrow(){
+                            *new_cloud_ready.borrow_mut() = false;
+
+
+                            let mut detection_operator = GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .state
+                                .lock()
+                                .unwrap()
+                                .detection_operator;
+                            println!("run detector {}",detection_operator.detection_operator_mode );
+
+
+                            if (detection_operator.detection_operator_mode > 0){
+
+                                // set ground init dim
+                                pallet_detector_handler.borrow_mut().set_ground_init_thresh(
+                                    detection_operator.filter_ground.init_ground_cx_min,
+                                    detection_operator.filter_ground.init_ground_cx_max,
+                                    detection_operator.filter_ground.init_ground_cy_min,
+                                    detection_operator.filter_ground.init_ground_cy_max,
+                                    detection_operator.filter_ground.init_ground_cz_min,
+                                    detection_operator.filter_ground.init_ground_cz_max,
+                                    detection_operator.filter_ground.init_ground_nz_min,
+                                );
+                                pallet_detector_handler.borrow_mut().set_ground_adaptive_thresh(
+                                    detection_operator.filter_ground.adaptive_x_min,
+                                    detection_operator.filter_ground.adaptive_x_max,
+                                    detection_operator.filter_ground.adaptive_y_min,
+                                    detection_operator.filter_ground.adaptive_y_max,
+                                    detection_operator.filter_ground.adaptive_z_min,
+                                    detection_operator.filter_ground.adaptive_z_max,
+                                );
+
+                                pallet_detector_handler.borrow_mut().set_ground_uncertain_thresh(
+                                    detection_operator.filter_ground.far_uncertain_z_max,
+                                    detection_operator.filter_ground.far_uncertain_x_change_min,
+                                    detection_operator
+                                        .filter_ground
+                                        .far_uncertain_adaptive_z_max,
+                                    detection_operator.filter_ground.far_uncertain_row,
+                                );
+
+                                pallet_detector_handler.borrow_mut().set_ground_init_dim(
+                                    detection_operator.filter_ground.init_ground_height_min,
+                                    detection_operator.filter_ground.init_ground_height_max,
+                                    detection_operator.filter_ground.init_ground_width_min,
+                                    detection_operator.filter_ground.init_ground_width_max,
+                                );
+                                // call filter
+                                pallet_detector_handler.borrow_mut().set_vertical_init_dim(
+                                    detection_operator.filter_vertical.init_center_height_min,
+                                    detection_operator.filter_vertical.init_center_height_max,
+                                    detection_operator.filter_vertical.init_center_width_min,
+                                    detection_operator.filter_vertical.init_center_width_max,
+                                );
+
+                                pallet_detector_handler.borrow_mut().set_vertical_init_thresh(
+                                    detection_operator.filter_vertical.init_center_cx_min,
+                                    detection_operator.filter_vertical.init_center_cx_max,
+                                    detection_operator.filter_vertical.init_center_cy_min,
+                                    detection_operator.filter_vertical.init_center_cy_max,
+                                    detection_operator.filter_vertical.init_center_cz_min,
+                                    detection_operator.filter_vertical.init_center_cz_max,
+                                    detection_operator.filter_vertical.init_center_jx_max,
+                                    detection_operator.filter_vertical.init_center_jy_max,
+                                    detection_operator.filter_vertical.init_center_jz_max,
+                                );
+                                pallet_detector_handler.borrow_mut().set_pallet_row(
+                                    detection_operator.filter_pallet.filter_pallet_row_high,
+                                    detection_operator.filter_pallet.filter_pallet_row_low,
+                                );
+                                pallet_detector_handler.borrow_mut().set_pallet_thresh(
+                                    detection_operator.filter_pallet.filter_pallet_x_min,
+                                    detection_operator.filter_pallet.filter_pallet_x_max,
+                                    detection_operator.filter_pallet.filter_pallet_y_min,
+                                    detection_operator.filter_pallet.filter_pallet_y_max,
+                                    detection_operator.filter_pallet.filter_pallet_z_min,
+                                    detection_operator.filter_pallet.filter_pallet_z_max,
+                                    detection_operator.filter_pallet.filter_pallet_jx,
+                                    detection_operator.filter_pallet.filter_pallet_jy,
+                                    detection_operator.filter_pallet.filter_pallet_jz,
+                                );
+
+
+
+
+                                if let Ok(ref mut mutex) =
+                                    GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock(){
+                                    let CloudFloatVecBuffer {
+                                        raw_buffer,
+                                        transform_buffer,
+                                        ref mut render_buffer,
+                                        ref mut float_num,
+                                    } = **mutex;
+
+
+                                    let mut ret =  pallet_detector_handler.borrow_mut().filter_ground(detection_operator.filter_ground.output_mode);
+
+                                    if(detection_operator.detection_operator_mode >= 2){
+                                        ret = pallet_detector_handler.borrow_mut().filter_vertical(detection_operator.filter_vertical.output_mode);
+                                    }
+                                    if(detection_operator.detection_operator_mode >= 3){
+                                        ret = pallet_detector_handler.borrow_mut().filter_pallet(detection_operator.filter_pallet.output_mode);
+                                    }
+
+                                    let (process_buffer, process_float_num) = ret;
+                                    if !process_buffer.is_null() && process_float_num > 0 {
+                                        *render_buffer = UnsafeSender::new(process_buffer);
+
+                                        *float_num = process_float_num as usize;
+                                        println!("set cloud_buffer render_buffer to process_buffer ");
+                                    }
+                                }
+
+                            }
+
+
+
+
+                        }
+
+                        true
+                    },100.0);
+
+                }
+
+                while signal.is_run(){
+
+                    task_manager.run();
+                }
+
+            }
+        );
+    }
+
+
     app.run();
 
     signal.stop();
 
     app_config.pallet_detector.extrinsic = *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
-    app_config.pallet_detector.cloud.filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
+    app_config.pallet_detector.cloud.filter =
+        GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
 
-    app_config.pallet_detector.filter_ground =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator.filter_ground;
-    app_config.pallet_detector.filter_vertical =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator.filter_vertical;
-    app_config.pallet_detector.filter_pallet =  GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator.filter_pallet;
+    app_config.pallet_detector.filter_ground = GLOBAL_DATA
+        .get()
+        .unwrap()
+        .state
+        .lock()
+        .unwrap()
+        .detection_operator
+        .filter_ground;
+    app_config.pallet_detector.filter_vertical = GLOBAL_DATA
+        .get()
+        .unwrap()
+        .state
+        .lock()
+        .unwrap()
+        .detection_operator
+        .filter_vertical;
+    app_config.pallet_detector.filter_pallet = GLOBAL_DATA
+        .get()
+        .unwrap()
+        .state
+        .lock()
+        .unwrap()
+        .detection_operator
+        .filter_pallet;
 
     let output_filename = "/tmp/gui_output.toml";
 
@@ -1018,7 +1670,7 @@ fn update_shader_render_demo(
                         let r = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
                         let h = (r * distance_ratio).min(360.0);
 
-                        let h = Color::hsl( h , 0.95, 0.7).as_rgba();
+                        let h = Color::hsl(h, 0.95, 0.7).as_rgba();
 
                         // let X = (a[0]/r).min(1.0);
                         // let Y = (a[1]/r).min(1.0);
@@ -1213,10 +1865,432 @@ fn raycast_picker(
 
 fn plot_marker(mut gizmos: Gizmos)
 {
+    let mut detection_operator = GLOBAL_DATA
+        .get()
+        .unwrap()
+        .state
+        .lock()
+        .unwrap()
+        .detection_operator;
+
     let marker_len = GLOBAL_DATA.get().unwrap().marker_pose.lock().unwrap().len();
     for i in 0..marker_len {
         let marker = GLOBAL_DATA.get().unwrap().marker_pose.lock().unwrap()[i];
         if marker.enable {
+            let fork_pos_y = detection_operator.filter_pallet.fork_pos_y;
+            let fork_shape_width = detection_operator.filter_pallet.fork_shape_width;
+            let fork_shape_width_2 = 0.5*fork_shape_width;
+            let fork_shape_height = detection_operator.filter_pallet.fork_shape_height;
+            let filter_pallet_z_pocket = detection_operator.filter_pallet.filter_pallet_z_pocket;
+
+            let pallet_space_width_left = detection_operator.filter_pallet.pallet_space_width_left;
+            let pallet_pocket_width = detection_operator.filter_pallet.pallet_pocket_width;
+
+            let pallet_space_width_center = detection_operator.filter_pallet.pallet_space_width_center;
+            let pallet_space_width_center_2 = pallet_space_width_center*0.5;
+            let pallet_space_height = detection_operator.filter_pallet.pallet_space_height;
+            let pallet_top_height = detection_operator.filter_pallet.pallet_top_height;
+            let pallet_pocket_empty_x = detection_operator.filter_pallet.pallet_pocket_empty_x;
+
+            let fork_len: f32 = pallet_pocket_empty_x;
+            if(i == 1){
+                let mut plain_points_a: [f32; 12] = [
+                    0.0, pallet_space_width_center_2 +  pallet_pocket_width, -pallet_space_height,
+                    0.0, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, -pallet_space_height ,
+                    0.0, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, pallet_top_height,
+                    0.0, 0.0, pallet_top_height
+                ];
+                let mut plain_points_c = plain_points_a;
+
+                for i in (0..4){
+                    plain_points_c[i*3 + 1] = - plain_points_a[i*3 + 1];
+                }
+
+                let mut plain_points_b: [f32; 15] = [
+                    0.0, 0.0, -pallet_space_height,
+                    0.0, pallet_space_width_center_2, -pallet_space_height ,
+                    0.0, pallet_space_width_center_2 , 0.0,
+                    0.0, pallet_space_width_center_2 +  pallet_pocket_width, 0.0,
+                    0.0, pallet_space_width_center_2 +  pallet_pocket_width, -pallet_space_height,
+
+                ];
+                let mut plain_points_d = plain_points_b;
+                for i in (0..5){
+                    plain_points_d[i*3 + 1] = - plain_points_b[i*3 + 1];
+                }
+                let mut plain_points_a_abs = plain_points_a;
+                let mut plain_points_b_abs = plain_points_b;
+                let mut plain_points_c_abs = plain_points_c;
+                let mut plain_points_d_abs = plain_points_d;
+
+                pointcloud_transform(
+                    plain_points_a.as_mut_ptr(),
+                    (plain_points_a.len() as u64 / 3u64),
+                    plain_points_a_abs.as_mut_ptr(),
+                    marker.pose.tx,
+                    marker.pose.ty,
+                    marker.pose.tz,
+                    marker.pose.roll,
+                    marker.pose.pitch,
+                    marker.pose.yaw,
+                );
+
+                pointcloud_transform(
+                    plain_points_b.as_mut_ptr(),
+                    (plain_points_b.len() as u64 / 3u64),
+                    plain_points_b_abs.as_mut_ptr(),
+                    marker.pose.tx,
+                    marker.pose.ty,
+                    marker.pose.tz,
+                    marker.pose.roll,
+                    marker.pose.pitch,
+                    marker.pose.yaw,
+                );
+
+                pointcloud_transform(
+                    plain_points_c.as_mut_ptr(),
+                    (plain_points_c.len() as u64 / 3u64),
+                    plain_points_c_abs.as_mut_ptr(),
+                    marker.pose.tx,
+                    marker.pose.ty,
+                    marker.pose.tz,
+                    marker.pose.roll,
+                    marker.pose.pitch,
+                    marker.pose.yaw,
+                );
+
+                pointcloud_transform(
+                    plain_points_d.as_mut_ptr(),
+                    (plain_points_d.len() as u64 / 3u64),
+                    plain_points_d_abs.as_mut_ptr(),
+                    marker.pose.tx,
+                    marker.pose.ty,
+                    marker.pose.tz,
+                    marker.pose.roll,
+                    marker.pose.pitch,
+                    marker.pose.yaw,
+                );
+
+
+                gizmos.linestrip(
+                    (0..plain_points_a_abs.len()/3).map(|x|Vec3 {
+                        x: plain_points_a_abs[3*x + 0],
+                        y: plain_points_a_abs[3*x +1],
+                        z: plain_points_a_abs[3*x + 2],
+                    }),
+
+                    Color::Rgba {
+                        red: 0.0,
+                        green: 1.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+
+                gizmos.linestrip(
+                    (0..plain_points_b_abs.len()/3).map(|x|Vec3 {
+                        x: plain_points_b_abs[3*x + 0],
+                        y: plain_points_b_abs[3*x +1],
+                        z: plain_points_b_abs[3*x + 2],
+                    }),
+
+                    Color::Rgba {
+                        red: 0.0,
+                        green: 1.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+
+                gizmos.linestrip(
+                    (0..plain_points_c_abs.len()/3).map(|x|Vec3 {
+                        x: plain_points_c_abs[3*x + 0],
+                        y: plain_points_c_abs[3*x +1],
+                        z: plain_points_c_abs[3*x + 2],
+                    }),
+
+                    Color::Rgba {
+                        red: 0.0,
+                        green: 1.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+                gizmos.linestrip(
+                    (0..plain_points_d_abs.len()/3).map(|x|Vec3 {
+                        x: plain_points_d_abs[3*x + 0],
+                        y: plain_points_d_abs[3*x +1],
+                        z: plain_points_d_abs[3*x + 2],
+                    }),
+
+                    Color::Rgba {
+                        red: 0.0,
+                        green: 1.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+
+            }
+
+            if (i == 0)
+            {
+
+
+
+                let mut plain_points_c: [f32; 24] = [
+                    0.0, pallet_space_width_center_2 +  pallet_pocket_width, filter_pallet_z_pocket,
+                    0.0, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, filter_pallet_z_pocket ,
+                    0.0, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, filter_pallet_z_pocket + fork_shape_height,
+                    0.0, pallet_space_width_center_2 +  pallet_pocket_width, filter_pallet_z_pocket + fork_shape_height,
+
+                    0.0, -(pallet_space_width_center_2 +  pallet_pocket_width), filter_pallet_z_pocket,
+                    0.0, -(pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left), filter_pallet_z_pocket ,
+                    0.0, -(pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left), filter_pallet_z_pocket + fork_shape_height,
+                    0.0, -(pallet_space_width_center_2 +  pallet_pocket_width), filter_pallet_z_pocket + fork_shape_height,
+                ];
+                let mut plain_points_d: [f32; 24] = [
+                    fork_len, pallet_space_width_center_2 +  pallet_pocket_width, filter_pallet_z_pocket,
+                    fork_len, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, filter_pallet_z_pocket ,
+                    fork_len, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, filter_pallet_z_pocket ,
+                    fork_len, pallet_space_width_center_2 +  pallet_pocket_width, filter_pallet_z_pocket ,
+
+                    fork_len, -(pallet_space_width_center_2 +  pallet_pocket_width), filter_pallet_z_pocket,
+                    fork_len, -(pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left), filter_pallet_z_pocket ,
+                    fork_len, -(pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left), filter_pallet_z_pocket ,
+                    fork_len, -(pallet_space_width_center_2 +  pallet_pocket_width), filter_pallet_z_pocket,
+                ];
+
+                let mut plain_points_a: [f32; 24] = [
+                    0.0, fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket,
+                    0.0, fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
+                    0.0, fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket + fork_shape_height,
+                    0.0, fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket + fork_shape_height,
+
+                    0.0, -fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket,
+                    0.0, -fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
+                    0.0, -fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket + fork_shape_height,
+                    0.0, -fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket + fork_shape_height,
+                ];
+
+                let mut plain_points_b: [f32; 24] = [
+                    fork_len, fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket,
+                    fork_len, fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
+                    fork_len, fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
+                    fork_len, fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket ,
+
+                    fork_len, -fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket,
+                    fork_len, -fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
+                    fork_len, -fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
+                    fork_len, -fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket ,
+                ];
+
+
+                let mut plain_points_a_abs = plain_points_a;
+                let mut plain_points_b_abs = plain_points_b;
+                let mut plain_points_c_abs = plain_points_c;
+                let mut plain_points_d_abs = plain_points_d;
+
+
+                pointcloud_transform(
+                    plain_points_a.as_mut_ptr(),
+                    (plain_points_a.len() as u64 / 3u64),
+                    plain_points_a_abs.as_mut_ptr(),
+                    marker.pose.tx,
+                    marker.pose.ty,
+                    marker.pose.tz,
+                    marker.pose.roll,
+                    marker.pose.pitch,
+                    marker.pose.yaw,
+                );
+                pointcloud_transform(
+                    plain_points_b.as_mut_ptr(),
+                    (plain_points_b.len() as u64 / 3u64),
+                    plain_points_b_abs.as_mut_ptr(),
+                    marker.pose.tx,
+                    marker.pose.ty,
+                    marker.pose.tz,
+                    marker.pose.roll,
+                    marker.pose.pitch,
+                    marker.pose.yaw,
+                );
+
+                pointcloud_transform(
+                    plain_points_c.as_mut_ptr(),
+                    (plain_points_c.len() as u64 / 3u64),
+                    plain_points_c_abs.as_mut_ptr(),
+                    marker.pose.tx,
+                    marker.pose.ty,
+                    marker.pose.tz,
+                    marker.pose.roll,
+                    marker.pose.pitch,
+                    marker.pose.yaw,
+                );
+                pointcloud_transform(
+                    plain_points_d.as_mut_ptr(),
+                    (plain_points_d.len() as u64 / 3u64),
+                    plain_points_d_abs.as_mut_ptr(),
+                    marker.pose.tx,
+                    marker.pose.ty,
+                    marker.pose.tz,
+                    marker.pose.roll,
+                    marker.pose.pitch,
+                    marker.pose.yaw,
+                );
+
+
+                        for x in (0..8)   {
+
+
+                    gizmos.linestrip(
+                        [Vec3 {
+                            x: plain_points_a_abs[3*x + 0],
+                            y: plain_points_a_abs[3*x +1],
+                            z: plain_points_a_abs[3*x + 2],
+                        },
+                            Vec3 {
+                                x: plain_points_b_abs[3*x + 0],
+                                y: plain_points_b_abs[3*x +1],
+                                z: plain_points_b_abs[3*x + 2],
+                            }],
+                        Color::Rgba {
+                            red: 0.0,
+                            green: 1.0,
+                            blue: 0.0,
+                            alpha: 0.5,
+                        },
+                    );
+
+
+                    gizmos.linestrip(
+                        [Vec3 {
+                            x: plain_points_c_abs[3*x + 0],
+                            y: plain_points_c_abs[3*x +1],
+                            z: plain_points_c_abs[3*x + 2],
+                        },
+                            Vec3 {
+                                x: plain_points_d_abs[3*x + 0],
+                                y: plain_points_d_abs[3*x +1],
+                                z: plain_points_d_abs[3*x + 2],
+                            }],
+                        Color::Rgba {
+                            red: 1.0,
+                            green: 0.0,
+                            blue: 0.0,
+                            alpha: 0.5,
+                        },
+                    );
+
+                }
+
+                gizmos.linestrip(
+                    [0,1,2,3,0].map(|x|Vec3 {
+                        x: plain_points_a_abs[3*x + 0],
+                        y: plain_points_a_abs[3*x +1],
+                        z: plain_points_a_abs[3*x + 2],
+                    }),
+                    Color::Rgba {
+                        red: 0.0,
+                        green: 1.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+                gizmos.linestrip(
+                    [4,5,6,7,4].map(|x|Vec3 {
+                        x: plain_points_a_abs[3*x + 0],
+                        y: plain_points_a_abs[3*x +1],
+                        z: plain_points_a_abs[3*x + 2],
+                    }),
+                    Color::Rgba {
+                        red: 0.0,
+                        green: 1.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+                gizmos.linestrip(
+                    [0,1,2,3,0].map(|x|Vec3 {
+                        x: plain_points_b_abs[3*x + 0],
+                        y: plain_points_b_abs[3*x +1],
+                        z: plain_points_b_abs[3*x + 2],
+                    }),
+                    Color::Rgba {
+                        red: 0.0,
+                        green: 1.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+                gizmos.linestrip(
+                    [4,5,6,7,4].map(|x|Vec3 {
+                        x: plain_points_b_abs[3*x + 0],
+                        y: plain_points_b_abs[3*x +1],
+                        z: plain_points_b_abs[3*x + 2],
+                    }),
+                    Color::Rgba {
+                        red: 0.0,
+                        green: 1.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+                //
+                gizmos.linestrip(
+                    [0,1,2,3,0].map(|x|Vec3 {
+                        x: plain_points_c_abs[3*x + 0],
+                        y: plain_points_c_abs[3*x +1],
+                        z: plain_points_c_abs[3*x + 2],
+                    }),
+                    Color::Rgba {
+                        red: 1.0,
+                        green: 0.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+                gizmos.linestrip(
+                    [4,5,6,7,4].map(|x|Vec3 {
+                        x: plain_points_c_abs[3*x + 0],
+                        y: plain_points_c_abs[3*x +1],
+                        z: plain_points_c_abs[3*x + 2],
+                    }),
+                    Color::Rgba {
+                        red: 1.0,
+                        green: 0.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+                gizmos.linestrip(
+                    [0,1,2,3,0].map(|x|Vec3 {
+                        x: plain_points_d_abs[3*x + 0],
+                        y: plain_points_d_abs[3*x +1],
+                        z: plain_points_d_abs[3*x + 2],
+                    }),
+                    Color::Rgba {
+                        red: 1.0,
+                        green: 0.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+                gizmos.linestrip(
+                    [4,5,6,7,4].map(|x|Vec3 {
+                        x: plain_points_d_abs[3*x + 0],
+                        y: plain_points_d_abs[3*x +1],
+                        z: plain_points_d_abs[3*x + 2],
+                    }),
+                    Color::Rgba {
+                        red: 1.0,
+                        green: 0.0,
+                        blue: 0.0,
+                        alpha: 0.5,
+                    },
+                );
+
+            }
+
             let mut p1 = [1.0f32, 0.0, 0.0];
 
             let rect_len = 0.3;
@@ -1587,13 +2661,16 @@ Click Reser to clear current indexes.
                 .len();
             ui.label(format!("Count: {}", tool_selected_points_index_len));
 
-            if tool_selected_points_index_len > 0{
-                if ui.button("Pop").clicked(){
+            if tool_selected_points_index_len > 0 {
+                if ui.button("Pop").clicked() {
                     GLOBAL_DATA
                         .get()
                         .unwrap()
-                        .tool_selected_points_index.lock().unwrap().pop();
-                    tool_selected_points_index_len -=1;
+                        .tool_selected_points_index
+                        .lock()
+                        .unwrap()
+                        .pop();
+                    tool_selected_points_index_len -= 1;
                 }
             }
 
@@ -1971,7 +3048,7 @@ Click Reser to clear current indexes.
 
             // filter.enable_dim = enable;//Some(enable);
         } else {
-            filter.enable_dim = false;//Some(false);
+            filter.enable_dim = false; //Some(false);
         }
         if range_ok {
             // let mut enable = filter.enable_range;
@@ -1980,183 +3057,533 @@ Click Reser to clear current indexes.
 
             // filter.enable_range =enable;// Some(enable);
         } else {
-            filter.enable_range = false;//Some(false);
+            filter.enable_range = false; //Some(false);
         }
 
         GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter = filter;
     });
     egui::Window::new("Detection")
         .resizable(true)
-        .show(ctx, |ui|{
-
+        .show(ctx, |ui| {
             // enable
             let [cloud_height, cloud_width] = GLOBAL_DATA.get().unwrap().cloud_dim;
 
-            let mut detection_operator = GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator;
+            let mut detection_operator = GLOBAL_DATA
+                .get()
+                .unwrap()
+                .state
+                .lock()
+                .unwrap()
+                .detection_operator;
             // program:
             // 0 nothing
             // 1 filter ground
-                // init_ground_range
-                // init_ground_thresh
-                // output_mode
+            // init_ground_range
+            // init_ground_thresh
+            // output_mode
             ui.checkbox(&mut detection_operator.enable, "Enable detector");
-            ui.add(Slider::new(&mut detection_operator.detection_operator_mode, 0..=10 as u32).text("detection_operator_mode"));
+            ui.add(
+                Slider::new(
+                    &mut detection_operator.detection_operator_mode,
+                    0..=10 as u32,
+                )
+                .text("detection_operator_mode"),
+            );
 
-            if detection_operator.enable{
-            }else{
+            if detection_operator.enable {
+            } else {
                 detection_operator.detection_operator_mode = 0;
             }
 
             ui.separator();
 
-            if detection_operator.detection_operator_mode >= 1{
-
+            if detection_operator.detection_operator_mode >= 1 {
                 ui.label("filter_ground");
 
                 ui.collapsing("filter_ground", |ui| {
                     ScrollArea::vertical().show(ui, |ui| {
                         // Add a lot of widgets here.
                         ui.vertical(|ui| {
-
-
                             {
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.output_mode, 0..=10 as u32).text("output_mode"));
-
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.output_mode,
+                                        0..=10 as u32,
+                                    )
+                                    .text("output_mode"),
+                                );
 
                                 //
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_height_min, 0..=cloud_height as u64).text("init_ground_height_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_height_max, detection_operator.filter_ground.init_ground_height_min..=cloud_height as u64).text("init_ground_height_max"));
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator
+                                            .filter_ground
+                                            .init_ground_height_min,
+                                        0..=cloud_height as u64,
+                                    )
+                                    .text("init_ground_height_min"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator
+                                            .filter_ground
+                                            .init_ground_height_max,
+                                        detection_operator.filter_ground.init_ground_height_min
+                                            ..=cloud_height as u64,
+                                    )
+                                    .text("init_ground_height_max"),
+                                );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_width_min, 0..=cloud_width as u64).text("init_ground_width_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_width_max, detection_operator.filter_ground.init_ground_width_min..=cloud_width as u64).text("init_ground_width_max"));
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.init_ground_width_min,
+                                        0..=cloud_width as u64,
+                                    )
+                                    .text("init_ground_width_min"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.init_ground_width_max,
+                                        detection_operator.filter_ground.init_ground_width_min
+                                            ..=cloud_width as u64,
+                                    )
+                                    .text("init_ground_width_max"),
+                                );
 
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.init_ground_cx_min,
+                                        -3.0..=3.0 as f32,
+                                    )
+                                    .text("init_ground_cx_min"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.init_ground_cx_max,
+                                        detection_operator.filter_ground.init_ground_cx_min
+                                            ..=3.0 as f32,
+                                    )
+                                    .text("init_ground_cx_max"),
+                                );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cx_min, -3.0..=3.0 as f32).text("init_ground_cx_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cx_max, detection_operator.filter_ground.init_ground_cx_min..=3.0 as f32).text("init_ground_cx_max"));
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.init_ground_cy_min,
+                                        -3.0..=3.0 as f32,
+                                    )
+                                    .text("init_ground_cy_min"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.init_ground_cy_max,
+                                        detection_operator.filter_ground.init_ground_cy_min
+                                            ..=3.0 as f32,
+                                    )
+                                    .text("init_ground_cy_max"),
+                                );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cy_min, -3.0..=3.0 as f32).text("init_ground_cy_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cy_max, detection_operator.filter_ground.init_ground_cy_min..=3.0 as f32).text("init_ground_cy_max"));
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.init_ground_cz_min,
+                                        -3.0..=3.0 as f32,
+                                    )
+                                    .text("init_ground_cz_min"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.init_ground_cz_max,
+                                        detection_operator.filter_ground.init_ground_cz_min
+                                            ..=3.0 as f32,
+                                    )
+                                    .text("init_ground_cz_max"),
+                                );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cz_min, -3.0..=3.0 as f32).text("init_ground_cz_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_cz_max, detection_operator.filter_ground.init_ground_cz_min..=3.0 as f32).text("init_ground_cz_max"));
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.init_ground_nz_min,
+                                        0.5..=1.0 as f32,
+                                    )
+                                    .text("init_ground_nz_min"),
+                                );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.init_ground_nz_min, 0.5..=1.0 as f32).text("init_ground_nz_min"));
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.adaptive_x_min,
+                                        -0.5..=0.5 as f32,
+                                    )
+                                    .text("adaptive_x_min"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.adaptive_x_max,
+                                        detection_operator.filter_ground.adaptive_x_min
+                                            ..=0.5 as f32,
+                                    )
+                                    .text("adaptive_x_max"),
+                                );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_x_min, -0.5..=0.5 as f32).text("adaptive_x_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_x_max, detection_operator.filter_ground.adaptive_x_min..=0.5 as f32).text("adaptive_x_max"));
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.adaptive_y_min,
+                                        -0.5..=1.0 as f32,
+                                    )
+                                    .text("adaptive_y_min"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.adaptive_y_max,
+                                        detection_operator.filter_ground.adaptive_y_min
+                                            ..=0.5 as f32,
+                                    )
+                                    .text("adaptive_y_max"),
+                                );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_y_min, -0.5..=1.0 as f32).text("adaptive_y_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_y_max, detection_operator.filter_ground.adaptive_y_min..=0.5 as f32).text("adaptive_y_max"));
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.adaptive_z_min,
+                                        -0.5..=1.0 as f32,
+                                    )
+                                    .text("adaptive_z_min"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.adaptive_z_max,
+                                        detection_operator.filter_ground.adaptive_z_min
+                                            ..=0.5 as f32,
+                                    )
+                                    .text("adaptive_z_max"),
+                                );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_z_min, -0.5..=1.0 as f32).text("adaptive_z_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.adaptive_z_max, detection_operator.filter_ground.adaptive_z_min..=0.5 as f32).text("adaptive_z_max"));
-
-
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_z_max, -0.1..=0.1 as f32).text("far_uncertain_z_max"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_adaptive_z_max, -0.1..=0.1 as f32).text("far_uncertain_adaptive_z_max"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_x_change_min, -0.1..=0.1 as f32).text("far_uncertain_x_change_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_ground.far_uncertain_row, -20..=20 ).text("far_uncertain_row"));
-
-
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.far_uncertain_z_max,
+                                        -0.1..=0.1 as f32,
+                                    )
+                                    .text("far_uncertain_z_max"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator
+                                            .filter_ground
+                                            .far_uncertain_adaptive_z_max,
+                                        -0.1..=0.1 as f32,
+                                    )
+                                    .text("far_uncertain_adaptive_z_max"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator
+                                            .filter_ground
+                                            .far_uncertain_x_change_min,
+                                        -0.1..=0.1 as f32,
+                                    )
+                                    .text("far_uncertain_x_change_min"),
+                                );
+                                ui.add(
+                                    Slider::new(
+                                        &mut detection_operator.filter_ground.far_uncertain_row,
+                                        -20..=20,
+                                    )
+                                    .text("far_uncertain_row"),
+                                );
                             }
-
-
-
                         });
                     });
                 }); // this is fine!
-
-
-
-
             }
-            if detection_operator.detection_operator_mode >= 2{
-
-
+            if detection_operator.detection_operator_mode >= 2 {
                 ui.collapsing("filter_vertical", |ui| {
                     ScrollArea::vertical().show(ui, |ui| {
                         // Add a lot of widgets here.
                         ui.vertical(|ui| {
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.output_mode,
+                                    0..=10 as u32,
+                                )
+                                .text("output_mode"),
+                            );
 
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_height_min,
+                                    0..=cloud_height as u64,
+                                )
+                                .text("init_center_height_min"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_height_max,
+                                    detection_operator.filter_vertical.init_center_height_min
+                                        ..=cloud_height as u64,
+                                )
+                                .text("init_center_height_max"),
+                            );
 
-                            {
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_width_min,
+                                    0..=cloud_width as u64,
+                                )
+                                .text("init_center_width_min"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_width_max,
+                                    detection_operator.filter_vertical.init_center_width_min
+                                        ..=cloud_width as u64,
+                                )
+                                .text("init_center_width_max"),
+                            );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.output_mode, 0..=10 as u32).text("output_mode"));
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_cx_min,
+                                    -3.0..=3.0 as f32,
+                                )
+                                .text("init_center_cx_min"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_cx_max,
+                                    detection_operator.filter_vertical.init_center_cx_min
+                                        ..=3.0 as f32,
+                                )
+                                .text("init_center_cx_max"),
+                            );
 
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_cy_min,
+                                    -3.0..=3.0 as f32,
+                                )
+                                .text("init_center_cy_min"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_cy_max,
+                                    detection_operator.filter_vertical.init_center_cy_min
+                                        ..=3.0 as f32,
+                                )
+                                .text("init_center_cy_max"),
+                            );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_height_min, 0..=cloud_height as u64).text("init_center_height_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_height_max, detection_operator.filter_vertical.init_center_height_min..=cloud_height as u64).text("init_center_height_max"));
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_cz_min,
+                                    -3.0..=3.0 as f32,
+                                )
+                                .text("init_center_cz_min"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_cz_max,
+                                    detection_operator.filter_vertical.init_center_cz_min
+                                        ..=3.0 as f32,
+                                )
+                                .text("init_center_cz_max"),
+                            );
 
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_width_min, 0..=cloud_width as u64).text("init_center_width_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_width_max, detection_operator.filter_vertical.init_center_width_min..=cloud_width as u64).text("init_center_width_max"));
-
-
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cx_min, -3.0..=3.0 as f32).text("init_center_cx_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cx_max, detection_operator.filter_vertical.init_center_cx_min..=3.0 as f32).text("init_center_cx_max"));
-
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cy_min, -3.0..=3.0 as f32).text("init_center_cy_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cy_max, detection_operator.filter_vertical.init_center_cy_min..=3.0 as f32).text("init_center_cy_max"));
-
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cz_min, -3.0..=3.0 as f32).text("init_center_cz_min"));
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_cz_max, detection_operator.filter_vertical.init_center_cz_min..=3.0 as f32).text("init_center_cz_max"));
-
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_jx_max, -0.2..=0.2 as f32).text("init_center_jx_max"));
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_jy_max, -0.2..=0.2 as f32).text("init_center_jy_max"));
-                                ui.add(Slider::new(&mut detection_operator.filter_vertical.init_center_jz_max, -0.2..=0.2 as f32).text("init_center_jz_max"));
-
-
-                            }
-
-
-
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_jx_max,
+                                    -0.2..=0.2 as f32,
+                                )
+                                .text("init_center_jx_max"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_jy_max,
+                                    -0.2..=0.2 as f32,
+                                )
+                                .text("init_center_jy_max"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_vertical.init_center_jz_max,
+                                    -0.2..=0.2 as f32,
+                                )
+                                .text("init_center_jz_max"),
+                            );
                         });
                     });
                 }); // this is fine!
-
-
             }
 
-            if detection_operator.detection_operator_mode >= 3{
-                ui.collapsing("filter_pallet", |ui|{
+            if detection_operator.detection_operator_mode >= 3 {
+                ui.collapsing("filter_pallet", |ui| {
+                    ScrollArea::vertical().show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.output_mode,
+                                    0..=100 as u32,
+                                )
+                                .text("output_mode"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_row_low,
+                                    -100..=100 as i32,
+                                )
+                                .text("filter_pallet_row_low"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_row_high,
+                                    -100..=100 as i32,
+                                )
+                                .text("filter_pallet_row_high"),
+                            );
 
-                    ScrollArea::vertical().show(ui, |ui|{
-                        ui.vertical(|ui|{
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_x_min,
+                                    -0.5..=0.5 as f32,
+                                )
+                                .text("filter_pallet_x_min"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_x_max,
+                                    detection_operator.filter_pallet.filter_pallet_x_min
+                                        ..=0.5 as f32,
+                                )
+                                .text("filter_pallet_x_max"),
+                            );
 
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.output_mode, 0..=100 as u32).text("output_mode"));
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_row_low, -100..=100 as i32).text("filter_pallet_row_low"));
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_row_high, -100..=100 as i32).text("filter_pallet_row_high"));
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_y_min,
+                                    -1.5..=1.5 as f32,
+                                )
+                                .text("filter_pallet_y_min"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_y_max,
+                                    detection_operator.filter_pallet.filter_pallet_y_min
+                                        ..=1.5 as f32,
+                                )
+                                .text("filter_pallet_y_max"),
+                            );
 
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_z_min,
+                                    -0.5..=0.5 as f32,
+                                )
+                                .text("filter_pallet_z_min"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_z_max,
+                                    detection_operator.filter_pallet.filter_pallet_z_min
+                                        ..=0.5 as f32,
+                                )
+                                .text("filter_pallet_z_max"),
+                            );
 
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_x_min, -0.5..=0.5 as f32).text("filter_pallet_x_min"));
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_x_max, detection_operator.filter_pallet.filter_pallet_x_min..=0.5 as f32).text("filter_pallet_x_max"));
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_jx,
+                                    -0.2..=0.2 as f32,
+                                )
+                                .text("filter_pallet_jx"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_jy,
+                                    -0.2..=0.2 as f32,
+                                )
+                                .text("filter_pallet_jy"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_jz,
+                                    -0.2..=0.2 as f32,
+                                )
+                                .text("filter_pallet_jz"),
+                            );
+                            //==================
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.filter_pallet_z_pocket,
+                                    -0.5..=0.5 as f32,
+                                )
+                                .text("filter_pallet_z_pocket"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.fork_shape_width,
+                                    0.01..=0.4 as f32,
+                                )
+                                .text("fork_shape_width"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.fork_pos_y,
+                                    0.0..=0.8 as f32,
+                                )
+                                .text("fork_pos_y"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.fork_shape_height,
+                                    0.01..=0.3 as f32,
+                                )
+                                .text("fork_shape_height"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.pallet_space_width_left,
+                                    0.01..=0.8 as f32,
+                                )
+                                .text("pallet_space_width_left"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.pallet_pocket_width,
+                                    0.05..=0.8 as f32,
+                                )
+                                .text("pallet_pocket_width"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.pallet_space_width_center,
+                                    0.00..=0.5 as f32,
+                                )
+                                .text("pallet_space_width_center"),
+                            );
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.pallet_space_height,
+                                    0.01..=0.5 as f32,
+                                )
+                                .text("pallet_space_height"),
+                            );
 
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_y_min, -1.5..=1.5 as f32).text("filter_pallet_y_min"));
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_y_max, detection_operator.filter_pallet.filter_pallet_y_min..=1.5 as f32).text("filter_pallet_y_max"));
-
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_z_min, -0.5..=0.5 as f32).text("filter_pallet_z_min"));
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_z_max, detection_operator.filter_pallet.filter_pallet_z_min..=0.5 as f32).text("filter_pallet_z_max"));
-
-
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_jx, -0.2..=0.2 as f32).text("filter_pallet_jx"));
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_jy, -0.2..=0.2 as f32).text("filter_pallet_jy"));
-                            ui.add(Slider::new(&mut detection_operator.filter_pallet.filter_pallet_jz, -0.2..=0.2 as f32).text("filter_pallet_jz"));
-
-
+                            ui.add(
+                                Slider::new(
+                                    &mut detection_operator.filter_pallet.pallet_top_height,
+                                    0.01..=0.5 as f32,
+                                )
+                                .text("pallet_top_height"),
+                            );
                         });
                     });
-
-
                 });
             }
 
-
-            GLOBAL_DATA.get().unwrap().state.lock().unwrap().detection_operator = detection_operator;
-
+            GLOBAL_DATA
+                .get()
+                .unwrap()
+                .state
+                .lock()
+                .unwrap()
+                .detection_operator = detection_operator;
 
             // program return
-
-            
-
         });
 
     egui::Window::new("Operator")

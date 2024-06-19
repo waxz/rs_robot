@@ -1,7 +1,7 @@
 
 
 [dds.participant]
-xml = "/home/waxz/RustroverProjects/rust_practice/crates/nx_gui/config/gui_config.xml"
+xml = "/home/waxz/RustroverProjects/rust_practice/crates/nx_gui/config/dds_config.xml"
 profile = "participant_discovery_protocol_SIMPLE"
 name = "dds_test_1"
 #interface_allowlist = []
@@ -10,12 +10,51 @@ interface_allowlist = ["lo"]
 interface_blocklist = ["eno1", "enx00e04d71ffe7", "wlp4s0", "wlp3s0", "docker0", "wt0"]
 
 [dds.readers.cloud_sub]
-topic_name = "cloud"
+topic_name = "pallet_detector/cloud"
 topic_type = "Message::Pointcloud640x480x3"
 sub_profile = ""
 topic_profile = ""
-reader_profile = "shm_reader_profile"
+reader_profile = ""
 qos_queue_size = 2
+
+[dds.readers.detector_cmd_sub]
+topic_name = "pallet_detector/cmd"
+topic_type = "Message::HeaderString1024"
+#topic_type = "Message::Pointcloud1920x1080x3"
+
+sub_profile = ""
+topic_profile = ""
+reader_profile = ""
+
+qos_queue_size = 10
+#
+
+[dds.writers.detector_status_pub]
+topic_name = "pallet_detector/status"
+topic_type = "Message::HeaderString1024"
+#topic_type = "Message::Pointcloud1920x1080x3"
+
+pub_profile = ""
+topic_profile = ""
+writer_profile = ""
+#writer_profile = ""
+
+qos_queue_size = 100
+
+[dds.writers.detector_result_pub]
+topic_name = "pallet_detector/result"
+topic_type = "Message::Path1024"
+
+#topic_type = "Message::Pointcloud1920x1080x3"
+
+pub_profile = ""
+topic_profile = ""
+writer_profile = ""
+#writer_profile = ""
+qos_queue_size = 100
+
+
+
 
 #[dds.writers.cloud_pub]
 #topic_name = "cloud2"
@@ -41,7 +80,9 @@ yaw = 1.5707963705062866
 [pallet_detector.extrinsic.pose]
 tx = 0.4000000059604645
 ty = 0.009999999776482582
-tz = 0.5001800060272217
+#tz = 0.5001800060272217
+tz = 0.4001800060272217
+
 roll = -1.5707963705062866
 pitch = 0.0
 yaw = 1.5707963705062866
@@ -71,13 +112,15 @@ filter_z_max = 1.0
 
 [pallet_detector.cloud.filter]
 enable_mean_window = true
-mean_window_len = 10
+mean_window_len = 5
+mean_window_jump_max = 0.5
 
 enable_dim = true
-filter_height_min = 300
-filter_height_max = 440
+filter_height_min = 250
+filter_height_max = 365
 filter_width_min = 110
 filter_width_max = 530
+
 enable_range = false
 filter_x_min = -5.0
 filter_y_min = -1.5
@@ -144,10 +187,12 @@ init_valid_num_min = 100
 
 output_mode = 1
 search_direction = 1
-init_ground_height_min = 70
-init_ground_height_max = 130
-init_ground_width_min = 150
-init_ground_width_max = 320
+init_ground_height_min = 110
+init_ground_height_max = 115
+init_ground_width_min = 130
+init_ground_width_max = 340
+
+
 init_ground_cx_min = -1.899999976158142
 init_ground_cx_max = -1.0
 init_ground_cy_min = -0.5
@@ -223,11 +268,12 @@ init_row_valid_num_min = 40
 output_mode = 1
 search_direction = 1
 init_center_height_min = 0
-init_center_height_max = 60
+init_center_height_max = 120
 init_center_width_min = 130
 init_center_width_max = 230
-init_center_cx_min = -2.0
-init_center_cx_max = -1.5
+
+init_center_cx_min = -2.2
+init_center_cx_max = -1.2
 init_center_cy_min = -0.30000001192092896
 init_center_cy_max = 0.30000001192092896
 init_center_cz_min = 0.0
@@ -287,13 +333,51 @@ pocket_relative_row_end = 20
 
 cluster_filter_pose_weight = 0.001
 
+# pallet center
+filter_pallet_line_x_min = -0.05
+filter_pallet_line_x_max = 0.05
+filter_pallet_line_y_min = -0.7
+filter_pallet_line_y_max = 0.7
+filter_pallet_line_z_min = -0.02
+filter_pallet_line_z_max = 0.05
+filter_pallet_line_continuous_min = 0.95
+
+# space
+filter_space_continuous_resolution = 0.02
+filter_space_move_window_x_search_start = -0.1
+filter_space_move_window_x_search_end = 0.1
+filter_space_move_window_x_search_step = 0.02
+filter_space_move_window_y_len = 0.07
+filter_space_move_window_x_thresh = 0.02
+filter_space_continuous_len_min = 0.12
+
+
+filter_space_second_height_high = -0.01
+filter_space_second_move_mean_thresh = 0.02
+filter_space_width_slip_len = 0.03
+
+
+# projector
+projector_dir_weight_p3 = 1.0
+projector_dir_weight_p3t = 1.0
+projector_dir_weight_t = 1.0
+projector_dir_weight_0 = 1.0
+projector_offset_y = 5.0
+projector_offset_z = 5.0
+projector_resolution = 0.01
+projector_search_y_range = 0.15
+projector_search_z_range = 0.15
+projector_search_maximum_distance = 0.05
+projector_similarity_min = 0.8
+
+
 # filter pallet
-filter_pallet_row_high = -1
+filter_pallet_row_high = -7
 filter_pallet_row_low = 40
 filter_pallet_x_min = -0.15000000596046448
 filter_pallet_x_max = 0.15000000596046448
-filter_pallet_y_min = -0.699999988079071
-filter_pallet_y_max = 0.699999988079071
+filter_pallet_y_min = -0.6
+filter_pallet_y_max = 0.6
 filter_pallet_z_min = -0.12
 filter_pallet_z_max = 0.07000000029802322
 filter_pallet_jx = 0.019999999552965164
@@ -301,12 +385,11 @@ filter_pallet_jy = 0.009999999776482582
 filter_pallet_jz = 0.019999999552965164
 
 # check pocket and fork
-filter_pallet_z_pocket = -0.1
+filter_pallet_z_pocket = -0.09
 # sensiteve to y error in initial pallet pose
 #fork_shape_width = 0.173
 fork_shape_width = 0.05
-#fork_pos_y = 0.2235
-fork_pos_y = 0.25
+fork_pos_y = 0.2235
 
 fork_shape_height = 0.06
 #fork_shape_height = 0.03
@@ -319,7 +402,7 @@ filter_space_continuous_num = 3
 filter_space_continuous_thresh = 0.05
 pallet_space_direction_diff_max = 0.03
 pallet_space_center_to_line_dist_max = 0.02
-pallet_pocket_empty_x = 0.2
+pallet_pocket_empty_x = 0.15
 pallet_space_valid_num = 50
 
 
@@ -337,3 +420,6 @@ pallet_pocket_width = 0.275
 pallet_space_width_center = 0.155
 pallet_space_height = 0.125
 pallet_top_height = 0.029
+
+
+ff-df = 12
