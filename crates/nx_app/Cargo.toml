@@ -30,11 +30,17 @@ rand = "0.8.5"
 
 toml = "0.8.6"
 
+rerun = { version = "0.13.0" }
+
 
 
 # nx lib
 nx_common = {path = "../nx_common"}
 nx_message_center= {path = "../nx_message_center"}
+nx_robot = {path = "../nx_robot"}
+
+spin_sleep = "1.1.1"
+
 bytemuck = "1.15.0"
 serde = { version = "1.0.201", features = ["derive"] }
 log = "0.4.21"

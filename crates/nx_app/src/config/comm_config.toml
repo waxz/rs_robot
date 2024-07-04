@@ -1,0 +1,139 @@
+# This is a TOML document.
+
+[general]
+version = 1
+
+
+
+# http://wiki.ros.org/Remapping%20Arguments
+# config parameter will be passed to base init function
+[ros.config]
+__name = "ros_motion_control"
+
+#[base.channel.scan_pub]
+#channel_type = "pub"
+#topic_name = "scan"
+#topic_type = "LaserScan"
+#qos_queue_size = 1
+#
+#[base.channel.scan_sub]
+#channel_type = "sub"
+#topic_name = "scan"
+#topic_type = "LaserScan"
+#qos_queue_size = 10
+
+
+
+[ros.writers.twist_pub]
+topic_name = "ros_motion_control/cmd_vel"
+#topic_name = "cmd_vel_joystick"
+topic_type = "Twist"
+qos_queue_size = 10
+
+#[base.channel.twist_sub]
+#channel_type = "sub"
+#topic_name = "twist"
+#topic_type = "Twist"
+#qos_queue_size = 10
+
+
+#[base.channel.uint8array_pub]
+#channel_type = "pub"
+#topic_name = "uint8array"
+#topic_type = "UInt8MultiArray"
+#qos_queue_size = 10
+#
+#[base.channel.uint8array_sub]
+#channel_type = "sub"
+#topic_name = "uint8array"
+#topic_type = "UInt8MultiArray"
+#qos_queue_size = 10
+#
+#[base.channel.uint16array_pub]
+#channel_type = "pub"
+#topic_name = "uint16array"
+#topic_type = "UInt16MultiArray"
+#qos_queue_size = 10
+#
+#[base.channel.uint16array_sub]
+#channel_type = "sub"
+#topic_name = "uint16array"
+#topic_type = "UInt16MultiArray"
+#qos_queue_size = 10
+
+[ros.writers.tf_pub]
+channel_type = "pub"
+topic_name = "tf"
+topic_type = "map:base_link"
+qos_queue_size = 10
+
+
+[ros.readers.tf_sub]
+channel_type = "sub"
+topic_name = "tf"
+topic_type = "map:base_link"
+qos_queue_size = 10
+
+##OccupancyGrid
+#[base.channel.map_sub]
+#channel_type = "sub"
+#topic_name = "map"
+#topic_type = "OccupancyGrid"
+#qos_queue_size = 10
+#
+#
+#[base.channel.map_pub]
+#channel_type = "pub"
+#topic_name = "map"
+#topic_type = "OccupancyGrid"
+#qos_queue_size = 10
+
+#Odometry
+[ros.readers.odom_sub]
+channel_type = "sub"
+topic_name = "odom"
+topic_type = "Odometry"
+qos_queue_size = 10
+
+[ros.writers.odom_pub]
+channel_type = "pub"
+topic_name = "odom"
+topic_type = "Odometry"
+qos_queue_size = 10
+
+[ros.readers.path_sub]
+channel_type = "sub"
+topic_name = "ros_motion_control/request_path"
+topic_type = "Path"
+qos_queue_size = 10
+
+[ros.writers.path_pub]
+channel_type = "pub"
+topic_name = "ros_motion_control/running_path"
+topic_type = "Path"
+qos_queue_size = 10
+
+[ros.readers.pose_sub]
+channel_type = "sub"
+topic_name = "ros_motion_control/request_goal"
+topic_type = "PoseStamped"
+qos_queue_size = 10
+
+[ros.writers.pose_pub]
+channel_type = "pub"
+topic_name = "pose"
+topic_type = "PoseStamped"
+qos_queue_size = 10
+
+
+[ros.readers.headerstring_sub]
+channel_type = "sub"
+topic_name = "ros_motion_control/command"
+topic_type = "HeaderString"
+qos_queue_size = 10
+
+[ros.writers.headerstring_pub]
+channel_type = "pub"
+topic_name = "ros_motion_control/status"
+topic_type = "HeaderString"
+qos_queue_size = 10
