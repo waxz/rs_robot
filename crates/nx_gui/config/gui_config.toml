@@ -1,5 +1,6 @@
 
 
+
 [dds.participant]
 xml = "/home/waxz/RustroverProjects/rust_practice/crates/nx_gui/config/dds_config.xml"
 profile = "participant_discovery_protocol_SIMPLE"
@@ -19,7 +20,7 @@ qos_queue_size = 2
 
 [dds.readers.detector_cmd_sub]
 topic_name = "pallet_detector/cmd"
-topic_type = "Message::HeaderString1024"
+topic_type = "Message::HeaderString4096"
 #topic_type = "Message::Pointcloud1920x1080x3"
 
 sub_profile = ""
@@ -31,7 +32,7 @@ qos_queue_size = 10
 
 [dds.writers.detector_status_pub]
 topic_name = "pallet_detector/status"
-topic_type = "Message::HeaderString1024"
+topic_type = "Message::HeaderString4096"
 #topic_type = "Message::Pointcloud1920x1080x3"
 
 pub_profile = ""
@@ -78,7 +79,7 @@ pitch = 0.0
 yaw = 1.5707963705062866
 
 [pallet_detector.extrinsic.pose]
-tx = 0.4000000059604645
+tx = 0.9300000059604645
 ty = 0.009999999776482582
 #tz = 0.5001800060272217
 tz = 0.4001800060272217
@@ -194,7 +195,7 @@ init_ground_width_max = 340
 
 
 init_ground_cx_min = -1.899999976158142
-init_ground_cx_max = -1.0
+init_ground_cx_max = -0.5
 init_ground_cy_min = -0.5
 init_ground_cy_max = 0.5
 init_ground_cz_min = -0.05000000074505806
@@ -364,11 +365,11 @@ projector_dir_weight_t = 1.0
 projector_dir_weight_0 = 1.0
 projector_offset_y = 5.0
 projector_offset_z = 5.0
-projector_resolution = 0.01
+projector_resolution = 0.005
 projector_search_y_range = 0.15
 projector_search_z_range = 0.15
 projector_search_maximum_distance = 0.05
-projector_similarity_min = 0.8
+projector_similarity_min = -0.6
 
 
 # filter pallet
@@ -404,7 +405,7 @@ pallet_space_direction_diff_max = 0.03
 pallet_space_center_to_line_dist_max = 0.02
 pallet_pocket_empty_x = 0.15
 pallet_space_valid_num = 50
-
+pallet_pocket_max_num = 10
 
 # pallet shape
 fork_safe_center_dist = 0.08
@@ -420,6 +421,6 @@ pallet_pocket_width = 0.275
 pallet_space_width_center = 0.155
 pallet_space_height = 0.125
 pallet_top_height = 0.029
-
+pallet_top_tail_height_ratio = 0.8
 
 ff-df = 12

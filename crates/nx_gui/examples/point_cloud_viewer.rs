@@ -8,14 +8,14 @@ use itertools::{izip, Itertools};
 use nx_common::common::types::UnsafeSender;
 use nx_message_center::base::common_message::shared::{HeaderString, PointCloud2};
 
+use std::cell::RefCell;
 use std::f32::consts::{PI, TAU};
 use std::f64::consts::FRAC_PI_2;
 use std::ffi::c_void;
 use std::io::Write;
 use std::ops::{BitAnd, Deref};
-use std::{fs, slice};
-use std::cell::RefCell;
 use std::rc::Rc;
+use std::{fs, slice};
 use time::{OffsetDateTime, UtcOffset};
 
 use bevy::app::{App, Startup, Update};
@@ -36,13 +36,13 @@ use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, MutexGuard};
 // argument
 use clap::Parser;
+use nx_common::common::task::TaskManager;
 use nx_gui::app_builder::{create_bevy_app, CameraFocusRay};
 use nx_gui::shaders::{setup_shaders_render, InstanceMaterialData, ShaderResConfig};
 use nx_message_center::base::pointcloud_process::perception::{
     pointcloud_clip, pointcloud_transform,
 };
 use serde::{Deserialize, Serialize};
-use nx_common::common::task::TaskManager;
 
 //-------------
 
@@ -216,7 +216,7 @@ struct PalletFilter
     fork_shape_width: f32,
     fork_pos_y: f32,
     fork_shape_height: f32,
-    pallet_pocket_empty_x:f32,
+    pallet_pocket_empty_x: f32,
 
     pallet_space_width_left: f32,
     pallet_pocket_width: f32,
@@ -310,6 +310,8 @@ struct StaticSharedData
     pub marker_pose: Arc<Mutex<Vec<PoseMarker>>>,
     pub extrinsic: Arc<Mutex<PoseMarker>>,
     pub calib_select: Arc<Mutex<Vec<CalibrationSelect>>>,
+
+    pub detected_pallets: Arc<Mutex<Vec<pointcloud_process::perception::PalletInfo>>>,
 }
 
 static GLOBAL_DATA: OnceLock<StaticSharedData> = OnceLock::new();
@@ -321,7 +323,8 @@ fn main()
         unsafe { TA_BUFFER.as_ptr() } as *mut _,
         64,
     );
-    let allocator = tiny_alloc::TinyAlloc::new(memory_pool_base, TA_BUFFER_SIZE - 64, 1024, 512, 64);
+    let allocator =
+        tiny_alloc::TinyAlloc::new(memory_pool_base, TA_BUFFER_SIZE - 64, 1024, 512, 64);
 
     println!("what's up");
     let args = Args::parse();
@@ -355,13 +358,10 @@ fn main()
 
     let cloud_dim = app_config.pallet_detector.cloud.dim;
 
-    let mut raw_float_vec =
-        allocator.alloc_as_array::<f32>((1 * 3) as usize);
-    let mut mean_filter_float_vec =
-        allocator.alloc_as_array::<f32>((1 * 3) as usize);
+    let mut raw_float_vec = allocator.alloc_as_array::<f32>((1 * 3) as usize);
+    let mut mean_filter_float_vec = allocator.alloc_as_array::<f32>((1 * 3) as usize);
 
-    let mut transform_float_vec =
-        allocator.alloc_as_array::<f32>((1* 3) as usize);
+    let mut transform_float_vec = allocator.alloc_as_array::<f32>((1 * 3) as usize);
 
     {
         let raw_float_vec_ptr = raw_float_vec.as_ptr();
@@ -410,6 +410,7 @@ fn main()
                 marker_pose: Arc::new(Mutex::new(vec![])),
                 extrinsic: Arc::new(Mutex::new(app_config.pallet_detector.extrinsic)),
                 calib_select: Arc::new(Mutex::new(vec![])),
+                detected_pallets: Arc::new(Mutex::new(vec![])),
             }
         });
 
@@ -459,13 +460,6 @@ fn main()
 
         let signal = signal.clone();
         dds_thread = Thread::new(move || {
-
-
-
-
-
-
-
             while signal.is_run() {
                 let enable_dds_update = GLOBAL_DATA
                     .get()
@@ -491,9 +485,7 @@ fn main()
                     .unwrap()
                     .detection_operator;
 
-                if
-                enable_dds_update ||
-                    dds_msg_count == 0 {
+                if enable_dds_update || dds_msg_count == 0 {
                     let recv_cloud = dds_handler.read_data(c"cloud_sub");
                     for m in recv_cloud.iter() {
                         let data: PointCloud2 = PointCloud2::from_ptr(*m);
@@ -797,8 +789,7 @@ fn main()
                             .unwrap()
                             .transform_buffer;
 
-                        if(!detection_operator.enable ){
-
+                        if (!detection_operator.enable) {
                             GLOBAL_DATA
                                 .get()
                                 .unwrap()
@@ -814,7 +805,6 @@ fn main()
                                 .lock()
                                 .unwrap()
                                 .float_num = transform_float_vec.len();
-
                         }
                         // info!("render_buffer=transform_buffer extrinsic: {:?}", extrinsic);
                     } else {
@@ -825,8 +815,7 @@ fn main()
                             .lock()
                             .unwrap()
                             .raw_buffer;
-                        if(!detection_operator.enable ){
-
+                        if (!detection_operator.enable) {
                             GLOBAL_DATA
                                 .get()
                                 .unwrap()
@@ -1058,18 +1047,13 @@ fn main()
                             }
                         }
 
-
-                        if detection_operator.detection_operator_mode == 4{
+                        if detection_operator.detection_operator_mode == 4 {
                             if let Ok(ref mut mutex) =
-                                GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock(){
-
+                                GLOBAL_DATA.get().unwrap().cloud_buffer.try_lock()
+                            {
                                 pallet_detector_handler.filter_ground(1);
                                 pallet_detector_handler.filter_vertical(1);
                                 pallet_detector_handler.filter_pallet(30);
-
-
-
-
                             }
                         }
 
@@ -1094,97 +1078,94 @@ fn main()
         });
     }
 
-
     {
         let signal = signal.clone();
 
         let app_config = app_config.clone();
-        dds_thread = Thread::new(
+        dds_thread = Thread::new(move || {
+            let cloud_dim = app_config.pallet_detector.cloud.dim;
 
-            move|| {
+            let mut raw_float_vec =
+                allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+            let mut mean_filter_float_vec =
+                allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
 
-                let cloud_dim = app_config.pallet_detector.cloud.dim;
+            let mut transform_float_vec =
+                allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
 
-                let mut raw_float_vec =
-                    allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
-                let mut mean_filter_float_vec =
-                    allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+            let mut task_manager = TaskManager::new(20, 20.0, 0);
 
-                let mut transform_float_vec =
-                    allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
+            let mut dds_handler =
+                Rc::new(RefCell::new(message_handler::MessageHandler::new("dds")));
+            let ok = dds_handler
+                .borrow_mut()
+                .create(args.dds_config.as_str(), *allocator.cfg.get());
+            if !ok {
+                println!("exit");
+                return;
+            }
+            let mut pallet_detector_handler = Rc::new(RefCell::new(
+                pointcloud_process::perception::PointcloudPalletDetector::new(),
+            ));
 
+            let ok = pallet_detector_handler
+                .borrow_mut()
+                .create(args.dds_config.as_str(), *allocator.cfg.get());
 
-                let mut task_manager = TaskManager::new(20,20.0,0);
+            if !ok {
+                println!("exit");
+                return;
+            }
 
-                let mut dds_handler=
-                    Rc::new(RefCell::new(  message_handler::MessageHandler::new("dds")))
-                    ;
-                let ok = dds_handler.borrow_mut().create(args.dds_config.as_str(), *allocator.cfg.get());
-                if !ok {
-                    println!("exit");
-                    return;
-                }
-                let mut pallet_detector_handler =
-                    Rc::new(RefCell::new(pointcloud_process::perception::PointcloudPalletDetector::new() )) ;
+            //
+            let cloud_dim = app_config.pallet_detector.cloud.dim;
+            let mut mean_window_filter_max =
+                app_config.pallet_detector.cloud.filter.mean_window_len;
+            let mut enable_mean_window = app_config.pallet_detector.cloud.filter.enable_mean_window;
+            let mut mean_window_filter_count = 0u32;
+            let mut mean_window_filter_count_reach = !enable_mean_window;
 
-                let ok = pallet_detector_handler.borrow_mut().create(args.dds_config.as_str(), *allocator.cfg.get());
+            let mut start_detect_cmd = Rc::new(RefCell::new(true));
+            let mut new_cloud_ready = Rc::new(RefCell::new(false));
 
-                if !ok {
-                    println!("exit");
-                    return;
-                }
+            let mean_window_jump_max = app_config.pallet_detector.cloud.filter.mean_window_jump_max;
 
+            {
+                let dds_handler = dds_handler.clone();
 
-                //
-                let cloud_dim = app_config.pallet_detector.cloud.dim;
-                let mut mean_window_filter_max = app_config.pallet_detector.cloud.filter.mean_window_len;
-                let mut enable_mean_window = app_config.pallet_detector.cloud.filter.enable_mean_window;
-                let mut mean_window_filter_count = 0u32;
-                let mut mean_window_filter_count_reach = !enable_mean_window;
-
-                let mut start_detect_cmd = Rc::new(RefCell::new(true));
-                let mut new_cloud_ready =  Rc::new(RefCell::new(false));
-
-                let mean_window_jump_max = app_config.pallet_detector.cloud.filter.mean_window_jump_max;
-
-                {
-
-
-                    let dds_handler = dds_handler.clone();
-
-                    task_manager.add("recv_msg", move|| {
-
+                task_manager.add(
+                    "recv_msg",
+                    move || {
                         //---- recv cmd
                         let mut binding = dds_handler.borrow_mut();
                         let recv_cmd = binding.read_data(c"detector_cmd_sub");
-                        for m in recv_cmd.iter(){
+                        for m in recv_cmd.iter() {
                             let msg: HeaderString = HeaderString::from_ptr(*m);
                             let timestamp_u64 = msg.get_stamp();
-                            let stamp = nx_common::common::time::get_local_from_ns(timestamp_u64 as i128);
-
+                            let stamp =
+                                nx_common::common::time::get_local_from_ns(timestamp_u64 as i128);
 
                             let data = msg.get_data();
-                            println!("recv_cmd, stamp: {}, data: {:?}",stamp, data);
-
-
-
+                            println!("recv_cmd, stamp: {}, data: {:?}", stamp, data);
                         }
                         true
-                    },100.0);
-                }
+                    },
+                    100.0,
+                );
+            }
 
-                //
-                {
+            //
+            {
+                let dds_handler = dds_handler.clone();
+                let mut pallet_detector_handler = pallet_detector_handler.clone();
+                let start_detect_cmd = start_detect_cmd.clone();
+                let new_cloud_ready = new_cloud_ready.clone();
 
+                let mut dds_msg_count = 0;
 
-                    let dds_handler = dds_handler.clone();
-                    let mut pallet_detector_handler = pallet_detector_handler.clone();
-                    let start_detect_cmd = start_detect_cmd.clone();
-                    let new_cloud_ready = new_cloud_ready.clone();
-
-
-                    task_manager.add("recv_cloud", move|| {
-
+                task_manager.add(
+                    "recv_cloud",
+                    move || {
                         let filter = GLOBAL_DATA.get().unwrap().state.lock().unwrap().filter;
                         let extrinsic = *GLOBAL_DATA.get().unwrap().extrinsic.lock().unwrap();
 
@@ -1192,17 +1173,22 @@ fn main()
                         let mut binding = dds_handler.borrow_mut();
                         let recv_cloud = binding.read_data(c"cloud_sub");
 
+                        let cloud_dim_height = filter.filter_height_max - filter.filter_height_min;
 
-                        for m in recv_cloud.iter(){
+                        let cloud_dim_width = (filter.filter_width_max - filter.filter_width_min);
+                        let float_vec_len = cloud_dim_height * cloud_dim_width * 3;
+
+                        for m in recv_cloud.iter() {
                             let data: PointCloud2 = PointCloud2::from_ptr(*m);
 
                             let timestamp_u64 = data.get_stamp();
                             let stamp =
                                 OffsetDateTime::from_unix_timestamp_nanos(timestamp_u64 as i128)
                                     .unwrap();
-                            let stamp = nx_common::common::time::get_local_from_ns(timestamp_u64 as i128);
+                            let stamp =
+                                nx_common::common::time::get_local_from_ns(timestamp_u64 as i128);
 
-                            println!("recv cloud: stamp: {}",stamp);
+                            println!("recv cloud: stamp: {}", stamp);
 
                             let current_stamp = OffsetDateTime::now_utc();
 
@@ -1217,14 +1203,6 @@ fn main()
 
                             let cloud_height_width = data.get_height_width();
 
-
-                            let cloud_dim_height = filter.filter_height_max
-                                - filter.filter_height_min;
-
-                            let cloud_dim_width = (filter.filter_width_max - filter.filter_width_min);
-                            let float_vec_len = cloud_dim_height
-                                * cloud_dim_width
-                                * 3;
                             raw_float_vec = allocator
                                 .realloc_as_array::<f32>(raw_float_vec, float_vec_len as usize);
                             transform_float_vec = allocator.realloc_as_array::<f32>(
@@ -1235,7 +1213,7 @@ fn main()
                                 mean_filter_float_vec,
                                 float_vec_len as usize,
                             );
-                            if (enable_mean_window){
+                            if (enable_mean_window) {
                                 pointcloud_clip(
                                     cloud_float_vec.as_ptr() as *mut _,
                                     cloud_height_width[0] as u64,
@@ -1255,13 +1233,8 @@ fn main()
                                     mean_window_jump_max,
                                 );
                                 mean_window_filter_count_reach =
-                                    mean_window_filter_count == mean_window_filter_max;
-
-                                if mean_window_filter_count_reach {
-                                    mean_window_filter_count = 0;
-                                }
-
-                            }else{
+                                    mean_window_filter_count >= mean_window_filter_max;
+                            } else {
                                 pointcloud_clip(
                                     cloud_float_vec.as_ptr() as *mut _,
                                     cloud_height_width[0] as u64,
@@ -1275,51 +1248,57 @@ fn main()
                                 mean_window_filter_count_reach = true;
                             }
 
-                            if(mean_window_filter_count_reach){
-                                *new_cloud_ready.borrow_mut() = true;
-
-                                pointcloud_transform(
-                                    raw_float_vec.as_mut_ptr() ,
-                                    (raw_float_vec.len() as u64) / 3,
-                                    transform_float_vec.as_mut_ptr() ,
-                                    extrinsic.pose.tx,
-                                    extrinsic.pose.ty,
-                                    extrinsic.pose.tz,
-                                    extrinsic.pose.roll,
-                                    extrinsic.pose.pitch,
-                                    extrinsic.pose.yaw,
-                                );
-
-                                pallet_detector_handler.borrow_mut().set_input(
-                                    transform_float_vec.as_mut_ptr(),
-                                    cloud_dim_height,
-                                    cloud_dim_width,
-                                    extrinsic.pose.tx,
-                                    extrinsic.pose.ty,
-                                    extrinsic.pose.tz,
-                                );
-
-
-
-
-
-                            }
-
-
+                            dds_msg_count += 1;
                         }
 
+                        if (mean_window_filter_count_reach) {
+                            mean_window_filter_count = 0;
+                            *new_cloud_ready.borrow_mut() = true;
+
+                            pointcloud_transform(
+                                raw_float_vec.as_mut_ptr(),
+                                (raw_float_vec.len() as u64) / 3,
+                                transform_float_vec.as_mut_ptr(),
+                                extrinsic.pose.tx,
+                                extrinsic.pose.ty,
+                                extrinsic.pose.tz,
+                                extrinsic.pose.roll,
+                                extrinsic.pose.pitch,
+                                extrinsic.pose.yaw,
+                            );
+
+                            pallet_detector_handler.borrow_mut().set_input(
+                                transform_float_vec.as_mut_ptr(),
+                                cloud_dim_height,
+                                cloud_dim_width,
+                                extrinsic.pose.tx,
+                                extrinsic.pose.ty,
+                                extrinsic.pose.tz,
+                            );
+                        }
+
+                        GLOBAL_DATA
+                            .get()
+                            .unwrap()
+                            .state
+                            .lock()
+                            .unwrap()
+                            .dds_msg_count = dds_msg_count;
+
                         true
-                    },100.0);
-                }
+                    },
+                    100.0,
+                );
+            }
 
-                {
-                    let dds_handler = dds_handler.clone();
-                    let mut pallet_detector_handler = pallet_detector_handler.clone();
+            {
+                let dds_handler = dds_handler.clone();
+                let mut pallet_detector_handler = pallet_detector_handler.clone();
 
-                    let start_detect_cmd = start_detect_cmd.clone();
-                    let new_cloud_ready = new_cloud_ready.clone();
+                let start_detect_cmd = start_detect_cmd.clone();
+                let new_cloud_ready = new_cloud_ready.clone();
 
-                    task_manager.add("detect", move||{
+                task_manager.add("detect", move||{
 
                         if *start_detect_cmd.borrow() && *new_cloud_ready.borrow(){
                             *new_cloud_ready.borrow_mut() = false;
@@ -1418,26 +1397,67 @@ fn main()
                                         ref mut float_num,
                                     } = **mutex;
 
+                                    let mut binding =pallet_detector_handler.borrow_mut();
+                                    if(detection_operator.detection_operator_mode >= 4){
+                                        detection_operator.filter_ground.output_mode = 1;
+                                        detection_operator.filter_vertical.output_mode = 1;
+                                        detection_operator.filter_pallet.output_mode = 1;
+                                    }
 
-                                    let mut ret =  pallet_detector_handler.borrow_mut().filter_ground(detection_operator.filter_ground.output_mode);
+                                    let mut ret =  binding.filter_ground(detection_operator.filter_ground.output_mode);
+
+                                    let ground_ret = ret;
 
                                     if(detection_operator.detection_operator_mode >= 2){
-                                        ret = pallet_detector_handler.borrow_mut().filter_vertical(detection_operator.filter_vertical.output_mode);
+                                        ret = binding.filter_vertical(detection_operator.filter_vertical.output_mode);
                                     }
                                     if(detection_operator.detection_operator_mode >= 3){
-                                        ret = pallet_detector_handler.borrow_mut().filter_pallet(detection_operator.filter_pallet.output_mode);
+                                        ret = binding.filter_pallet(detection_operator.filter_pallet.output_mode);
                                     }
 
-                                    let (process_buffer, process_float_num) = ret;
-                                    if !process_buffer.is_null() && process_float_num > 0 {
-                                        *render_buffer = UnsafeSender::new(process_buffer);
+                                    GLOBAL_DATA.get().unwrap().detected_pallets.lock().unwrap().clear();
 
-                                        *float_num = process_float_num as usize;
-                                        println!("set cloud_buffer render_buffer to process_buffer ");
+                                    if(detection_operator.detection_operator_mode >= 4){
+
+                                        let pallet_buffer = binding.get_pallet(0);
+                                        println!("get pallet : {:?}",pallet_buffer );
+                                        if(pallet_buffer.len() >0 ){
+                                            let (process_buffer, process_float_num) = ground_ret;
+                                            if !process_buffer.is_null() && process_float_num > 0 {
+                                                *render_buffer = UnsafeSender::new(process_buffer);
+
+                                                *float_num = process_float_num as usize;
+                                                println!("set cloud_buffer render_buffer to process_buffer ");
+                                            }
+                                        }
+
+                                        GLOBAL_DATA.get().unwrap().detected_pallets.lock().unwrap().extend(pallet_buffer);
+                                    }else{
+                                        let (process_buffer, process_float_num) = ret;
+                                        if !process_buffer.is_null() && process_float_num > 0 {
+                                            *render_buffer = UnsafeSender::new(process_buffer);
+
+                                            *float_num = process_float_num as usize;
+                                            println!("set cloud_buffer render_buffer to process_buffer ");
+                                        }
                                     }
+
+
+
+
+
                                 }
 
                             }
+
+                            GLOBAL_DATA
+                                .get()
+                                .unwrap()
+                                .state
+                                .lock()
+                                .unwrap()
+                                .detection_operator = detection_operator;
+
 
 
 
@@ -1446,18 +1466,13 @@ fn main()
 
                         true
                     },100.0);
-
-                }
-
-                while signal.is_run(){
-
-                    task_manager.run();
-                }
-
             }
-        );
-    }
 
+            while signal.is_run() {
+                task_manager.run();
+            }
+        });
+    }
 
     app.run();
 
@@ -1872,51 +1887,279 @@ fn plot_marker(mut gizmos: Gizmos)
         .lock()
         .unwrap()
         .detection_operator;
+    let fork_pos_y = detection_operator.filter_pallet.fork_pos_y;
+    let fork_shape_width = detection_operator.filter_pallet.fork_shape_width;
+    let fork_shape_width_2 = 0.5 * fork_shape_width;
+    let fork_shape_height = detection_operator.filter_pallet.fork_shape_height;
+    let filter_pallet_z_pocket = detection_operator.filter_pallet.filter_pallet_z_pocket;
+
+    let pallet_space_width_left = detection_operator.filter_pallet.pallet_space_width_left;
+    let pallet_pocket_width = detection_operator.filter_pallet.pallet_pocket_width;
+
+    let pallet_space_width_center = detection_operator.filter_pallet.pallet_space_width_center;
+    let pallet_space_width_center_2 = pallet_space_width_center * 0.5;
+    let pallet_space_height = detection_operator.filter_pallet.pallet_space_height;
+    let pallet_top_height = detection_operator.filter_pallet.pallet_top_height;
+    let pallet_pocket_empty_x = detection_operator.filter_pallet.pallet_pocket_empty_x;
+
+    let fork_len: f32 = pallet_pocket_empty_x;
+
+    let detected_pallets_len = GLOBAL_DATA
+        .get()
+        .unwrap()
+        .detected_pallets
+        .lock()
+        .unwrap()
+        .len();
+
+    if (detected_pallets_len > 0) {
+        let mut plain_points_a: [f32; 12] = [
+            0.0,
+            pallet_space_width_center_2 + pallet_pocket_width,
+            -pallet_space_height,
+            0.0,
+            pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left,
+            -pallet_space_height,
+            0.0,
+            pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left,
+            pallet_top_height,
+            0.0,
+            0.0,
+            pallet_top_height,
+        ];
+        let mut plain_points_c = plain_points_a;
+
+        for i in (0..4) {
+            plain_points_c[i * 3 + 1] = -plain_points_a[i * 3 + 1];
+        }
+
+        let mut plain_points_b: [f32; 15] = [
+            0.0,
+            0.0,
+            -pallet_space_height,
+            0.0,
+            pallet_space_width_center_2,
+            -pallet_space_height,
+            0.0,
+            pallet_space_width_center_2,
+            0.0,
+            0.0,
+            pallet_space_width_center_2 + pallet_pocket_width,
+            0.0,
+            0.0,
+            pallet_space_width_center_2 + pallet_pocket_width,
+            -pallet_space_height,
+        ];
+        let mut plain_points_d = plain_points_b;
+        for i in (0..5) {
+            plain_points_d[i * 3 + 1] = -plain_points_b[i * 3 + 1];
+        }
+        let mut plain_points_a_abs = plain_points_a;
+        let mut plain_points_b_abs = plain_points_b;
+        let mut plain_points_c_abs = plain_points_c;
+        let mut plain_points_d_abs = plain_points_d;
+
+        let mut axis = [fork_len, 0.0, 0.0, 0.0, fork_len, 0.0, 0.0, 0.0, fork_len];
+        let mut axis_abs = [0.0f32; 9];
+
+        for p in GLOBAL_DATA
+            .get()
+            .unwrap()
+            .detected_pallets
+            .lock()
+            .unwrap()
+            .iter()
+        {
+            pointcloud_transform(
+                plain_points_a.as_mut_ptr(),
+                (plain_points_a.len() as u64 / 3u64),
+                plain_points_a_abs.as_mut_ptr(),
+                p.tx as f32,
+                p.ty as f32,
+                p.tz as f32,
+                p.roll as f32,
+                p.pitch as f32,
+                p.yaw as f32,
+            );
+
+            pointcloud_transform(
+                plain_points_b.as_mut_ptr(),
+                (plain_points_b.len() as u64 / 3u64),
+                plain_points_b_abs.as_mut_ptr(),
+                p.tx as f32,
+                p.ty as f32,
+                p.tz as f32,
+                p.roll as f32,
+                p.pitch as f32,
+                p.yaw as f32,
+            );
+
+            pointcloud_transform(
+                plain_points_c.as_mut_ptr(),
+                (plain_points_c.len() as u64 / 3u64),
+                plain_points_c_abs.as_mut_ptr(),
+                p.tx as f32,
+                p.ty as f32,
+                p.tz as f32,
+                p.roll as f32,
+                p.pitch as f32,
+                p.yaw as f32,
+            );
+
+            pointcloud_transform(
+                plain_points_d.as_mut_ptr(),
+                (plain_points_d.len() as u64 / 3u64),
+                plain_points_d_abs.as_mut_ptr(),
+                p.tx as f32,
+                p.ty as f32,
+                p.tz as f32,
+                p.roll as f32,
+                p.pitch as f32,
+                p.yaw as f32,
+            );
+
+            gizmos.linestrip(
+                (0..plain_points_a_abs.len() / 3).map(|x| Vec3 {
+                    x: plain_points_a_abs[3 * x + 0],
+                    y: plain_points_a_abs[3 * x + 1],
+                    z: plain_points_a_abs[3 * x + 2],
+                }),
+                Color::Rgba {
+                    red: 0.0,
+                    green: 1.0,
+                    blue: 0.0,
+                    alpha: 0.5,
+                },
+            );
+
+            gizmos.linestrip(
+                (0..plain_points_b_abs.len() / 3).map(|x| Vec3 {
+                    x: plain_points_b_abs[3 * x + 0],
+                    y: plain_points_b_abs[3 * x + 1],
+                    z: plain_points_b_abs[3 * x + 2],
+                }),
+                Color::Rgba {
+                    red: 0.0,
+                    green: 1.0,
+                    blue: 0.0,
+                    alpha: 0.5,
+                },
+            );
+
+            gizmos.linestrip(
+                (0..plain_points_c_abs.len() / 3).map(|x| Vec3 {
+                    x: plain_points_c_abs[3 * x + 0],
+                    y: plain_points_c_abs[3 * x + 1],
+                    z: plain_points_c_abs[3 * x + 2],
+                }),
+                Color::Rgba {
+                    red: 0.0,
+                    green: 1.0,
+                    blue: 0.0,
+                    alpha: 0.5,
+                },
+            );
+            gizmos.linestrip(
+                (0..plain_points_d_abs.len() / 3).map(|x| Vec3 {
+                    x: plain_points_d_abs[3 * x + 0],
+                    y: plain_points_d_abs[3 * x + 1],
+                    z: plain_points_d_abs[3 * x + 2],
+                }),
+                Color::Rgba {
+                    red: 0.0,
+                    green: 1.0,
+                    blue: 0.0,
+                    alpha: 0.5,
+                },
+            );
+
+            pointcloud_transform(
+                axis.as_mut_ptr(),
+                3,
+                axis_abs.as_mut_ptr(),
+                0.0,
+                0.0,
+                0.0,
+                p.roll as f32,
+                p.pitch as f32,
+                p.yaw as f32,
+            );
+
+            gizmos.ray(
+                Vec3 {
+                    x: p.tx as f32,
+                    y: p.ty as f32,
+                    z: p.tz as f32,
+                },
+                Vec3::new(axis_abs[0], axis_abs[1], axis_abs[2]),
+                Color::RED,
+            );
+            gizmos.ray(
+                Vec3 {
+                    x: p.tx as f32,
+                    y: p.ty as f32,
+                    z: p.tz as f32,
+                },
+                Vec3::new(axis_abs[3], axis_abs[4], axis_abs[5]),
+                Color::GREEN,
+            );
+            gizmos.ray(
+                Vec3 {
+                    x: p.tx as f32,
+                    y: p.ty as f32,
+                    z: p.tz as f32,
+                },
+                Vec3::new(axis_abs[6], axis_abs[7], axis_abs[8]),
+                Color::BLUE,
+            );
+        }
+    }
 
     let marker_len = GLOBAL_DATA.get().unwrap().marker_pose.lock().unwrap().len();
     for i in 0..marker_len {
         let marker = GLOBAL_DATA.get().unwrap().marker_pose.lock().unwrap()[i];
         if marker.enable {
-            let fork_pos_y = detection_operator.filter_pallet.fork_pos_y;
-            let fork_shape_width = detection_operator.filter_pallet.fork_shape_width;
-            let fork_shape_width_2 = 0.5*fork_shape_width;
-            let fork_shape_height = detection_operator.filter_pallet.fork_shape_height;
-            let filter_pallet_z_pocket = detection_operator.filter_pallet.filter_pallet_z_pocket;
-
-            let pallet_space_width_left = detection_operator.filter_pallet.pallet_space_width_left;
-            let pallet_pocket_width = detection_operator.filter_pallet.pallet_pocket_width;
-
-            let pallet_space_width_center = detection_operator.filter_pallet.pallet_space_width_center;
-            let pallet_space_width_center_2 = pallet_space_width_center*0.5;
-            let pallet_space_height = detection_operator.filter_pallet.pallet_space_height;
-            let pallet_top_height = detection_operator.filter_pallet.pallet_top_height;
-            let pallet_pocket_empty_x = detection_operator.filter_pallet.pallet_pocket_empty_x;
-
-            let fork_len: f32 = pallet_pocket_empty_x;
-            if(i == 1){
+            if (i == 1) {
                 let mut plain_points_a: [f32; 12] = [
-                    0.0, pallet_space_width_center_2 +  pallet_pocket_width, -pallet_space_height,
-                    0.0, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, -pallet_space_height ,
-                    0.0, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, pallet_top_height,
-                    0.0, 0.0, pallet_top_height
+                    0.0,
+                    pallet_space_width_center_2 + pallet_pocket_width,
+                    -pallet_space_height,
+                    0.0,
+                    pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left,
+                    -pallet_space_height,
+                    0.0,
+                    pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left,
+                    pallet_top_height,
+                    0.0,
+                    0.0,
+                    pallet_top_height,
                 ];
                 let mut plain_points_c = plain_points_a;
 
-                for i in (0..4){
-                    plain_points_c[i*3 + 1] = - plain_points_a[i*3 + 1];
+                for i in (0..4) {
+                    plain_points_c[i * 3 + 1] = -plain_points_a[i * 3 + 1];
                 }
 
                 let mut plain_points_b: [f32; 15] = [
-                    0.0, 0.0, -pallet_space_height,
-                    0.0, pallet_space_width_center_2, -pallet_space_height ,
-                    0.0, pallet_space_width_center_2 , 0.0,
-                    0.0, pallet_space_width_center_2 +  pallet_pocket_width, 0.0,
-                    0.0, pallet_space_width_center_2 +  pallet_pocket_width, -pallet_space_height,
-
+                    0.0,
+                    0.0,
+                    -pallet_space_height,
+                    0.0,
+                    pallet_space_width_center_2,
+                    -pallet_space_height,
+                    0.0,
+                    pallet_space_width_center_2,
+                    0.0,
+                    0.0,
+                    pallet_space_width_center_2 + pallet_pocket_width,
+                    0.0,
+                    0.0,
+                    pallet_space_width_center_2 + pallet_pocket_width,
+                    -pallet_space_height,
                 ];
                 let mut plain_points_d = plain_points_b;
-                for i in (0..5){
-                    plain_points_d[i*3 + 1] = - plain_points_b[i*3 + 1];
+                for i in (0..5) {
+                    plain_points_d[i * 3 + 1] = -plain_points_b[i * 3 + 1];
                 }
                 let mut plain_points_a_abs = plain_points_a;
                 let mut plain_points_b_abs = plain_points_b;
@@ -1971,14 +2214,12 @@ fn plot_marker(mut gizmos: Gizmos)
                     marker.pose.yaw,
                 );
 
-
                 gizmos.linestrip(
-                    (0..plain_points_a_abs.len()/3).map(|x|Vec3 {
-                        x: plain_points_a_abs[3*x + 0],
-                        y: plain_points_a_abs[3*x +1],
-                        z: plain_points_a_abs[3*x + 2],
+                    (0..plain_points_a_abs.len() / 3).map(|x| Vec3 {
+                        x: plain_points_a_abs[3 * x + 0],
+                        y: plain_points_a_abs[3 * x + 1],
+                        z: plain_points_a_abs[3 * x + 2],
                     }),
-
                     Color::Rgba {
                         red: 0.0,
                         green: 1.0,
@@ -1988,12 +2229,11 @@ fn plot_marker(mut gizmos: Gizmos)
                 );
 
                 gizmos.linestrip(
-                    (0..plain_points_b_abs.len()/3).map(|x|Vec3 {
-                        x: plain_points_b_abs[3*x + 0],
-                        y: plain_points_b_abs[3*x +1],
-                        z: plain_points_b_abs[3*x + 2],
+                    (0..plain_points_b_abs.len() / 3).map(|x| Vec3 {
+                        x: plain_points_b_abs[3 * x + 0],
+                        y: plain_points_b_abs[3 * x + 1],
+                        z: plain_points_b_abs[3 * x + 2],
                     }),
-
                     Color::Rgba {
                         red: 0.0,
                         green: 1.0,
@@ -2003,12 +2243,11 @@ fn plot_marker(mut gizmos: Gizmos)
                 );
 
                 gizmos.linestrip(
-                    (0..plain_points_c_abs.len()/3).map(|x|Vec3 {
-                        x: plain_points_c_abs[3*x + 0],
-                        y: plain_points_c_abs[3*x +1],
-                        z: plain_points_c_abs[3*x + 2],
+                    (0..plain_points_c_abs.len() / 3).map(|x| Vec3 {
+                        x: plain_points_c_abs[3 * x + 0],
+                        y: plain_points_c_abs[3 * x + 1],
+                        z: plain_points_c_abs[3 * x + 2],
                     }),
-
                     Color::Rgba {
                         red: 0.0,
                         green: 1.0,
@@ -2017,12 +2256,11 @@ fn plot_marker(mut gizmos: Gizmos)
                     },
                 );
                 gizmos.linestrip(
-                    (0..plain_points_d_abs.len()/3).map(|x|Vec3 {
-                        x: plain_points_d_abs[3*x + 0],
-                        y: plain_points_d_abs[3*x +1],
-                        z: plain_points_d_abs[3*x + 2],
+                    (0..plain_points_d_abs.len() / 3).map(|x| Vec3 {
+                        x: plain_points_d_abs[3 * x + 0],
+                        y: plain_points_d_abs[3 * x + 1],
+                        z: plain_points_d_abs[3 * x + 2],
                     }),
-
                     Color::Rgba {
                         red: 0.0,
                         green: 1.0,
@@ -2030,67 +2268,120 @@ fn plot_marker(mut gizmos: Gizmos)
                         alpha: 0.5,
                     },
                 );
-
             }
 
-            if (i == 0)
-            {
-
-
-
+            if (i == 0) {
                 let mut plain_points_c: [f32; 24] = [
-                    0.0, pallet_space_width_center_2 +  pallet_pocket_width, filter_pallet_z_pocket,
-                    0.0, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, filter_pallet_z_pocket ,
-                    0.0, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, filter_pallet_z_pocket + fork_shape_height,
-                    0.0, pallet_space_width_center_2 +  pallet_pocket_width, filter_pallet_z_pocket + fork_shape_height,
-
-                    0.0, -(pallet_space_width_center_2 +  pallet_pocket_width), filter_pallet_z_pocket,
-                    0.0, -(pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left), filter_pallet_z_pocket ,
-                    0.0, -(pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left), filter_pallet_z_pocket + fork_shape_height,
-                    0.0, -(pallet_space_width_center_2 +  pallet_pocket_width), filter_pallet_z_pocket + fork_shape_height,
+                    0.0,
+                    pallet_space_width_center_2 + pallet_pocket_width,
+                    filter_pallet_z_pocket,
+                    0.0,
+                    pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left,
+                    filter_pallet_z_pocket,
+                    0.0,
+                    pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left,
+                    filter_pallet_z_pocket + fork_shape_height,
+                    0.0,
+                    pallet_space_width_center_2 + pallet_pocket_width,
+                    filter_pallet_z_pocket + fork_shape_height,
+                    0.0,
+                    -(pallet_space_width_center_2 + pallet_pocket_width),
+                    filter_pallet_z_pocket,
+                    0.0,
+                    -(pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left),
+                    filter_pallet_z_pocket,
+                    0.0,
+                    -(pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left),
+                    filter_pallet_z_pocket + fork_shape_height,
+                    0.0,
+                    -(pallet_space_width_center_2 + pallet_pocket_width),
+                    filter_pallet_z_pocket + fork_shape_height,
                 ];
                 let mut plain_points_d: [f32; 24] = [
-                    fork_len, pallet_space_width_center_2 +  pallet_pocket_width, filter_pallet_z_pocket,
-                    fork_len, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, filter_pallet_z_pocket ,
-                    fork_len, pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left, filter_pallet_z_pocket ,
-                    fork_len, pallet_space_width_center_2 +  pallet_pocket_width, filter_pallet_z_pocket ,
-
-                    fork_len, -(pallet_space_width_center_2 +  pallet_pocket_width), filter_pallet_z_pocket,
-                    fork_len, -(pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left), filter_pallet_z_pocket ,
-                    fork_len, -(pallet_space_width_center_2 +  pallet_pocket_width + pallet_space_width_left), filter_pallet_z_pocket ,
-                    fork_len, -(pallet_space_width_center_2 +  pallet_pocket_width), filter_pallet_z_pocket,
+                    fork_len,
+                    pallet_space_width_center_2 + pallet_pocket_width,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    pallet_space_width_center_2 + pallet_pocket_width,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    -(pallet_space_width_center_2 + pallet_pocket_width),
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    -(pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left),
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    -(pallet_space_width_center_2 + pallet_pocket_width + pallet_space_width_left),
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    -(pallet_space_width_center_2 + pallet_pocket_width),
+                    filter_pallet_z_pocket,
                 ];
 
                 let mut plain_points_a: [f32; 24] = [
-                    0.0, fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket,
-                    0.0, fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
-                    0.0, fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket + fork_shape_height,
-                    0.0, fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket + fork_shape_height,
-
-                    0.0, -fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket,
-                    0.0, -fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
-                    0.0, -fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket + fork_shape_height,
-                    0.0, -fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket + fork_shape_height,
+                    0.0,
+                    fork_pos_y - fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    0.0,
+                    fork_pos_y + fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    0.0,
+                    fork_pos_y + fork_shape_width_2,
+                    filter_pallet_z_pocket + fork_shape_height,
+                    0.0,
+                    fork_pos_y - fork_shape_width_2,
+                    filter_pallet_z_pocket + fork_shape_height,
+                    0.0,
+                    -fork_pos_y - fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    0.0,
+                    -fork_pos_y + fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    0.0,
+                    -fork_pos_y + fork_shape_width_2,
+                    filter_pallet_z_pocket + fork_shape_height,
+                    0.0,
+                    -fork_pos_y - fork_shape_width_2,
+                    filter_pallet_z_pocket + fork_shape_height,
                 ];
 
                 let mut plain_points_b: [f32; 24] = [
-                    fork_len, fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket,
-                    fork_len, fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
-                    fork_len, fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
-                    fork_len, fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket ,
-
-                    fork_len, -fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket,
-                    fork_len, -fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
-                    fork_len, -fork_pos_y + fork_shape_width_2, filter_pallet_z_pocket ,
-                    fork_len, -fork_pos_y - fork_shape_width_2, filter_pallet_z_pocket ,
+                    fork_len,
+                    fork_pos_y - fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    fork_pos_y + fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    fork_pos_y + fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    fork_pos_y - fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    -fork_pos_y - fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    -fork_pos_y + fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    -fork_pos_y + fork_shape_width_2,
+                    filter_pallet_z_pocket,
+                    fork_len,
+                    -fork_pos_y - fork_shape_width_2,
+                    filter_pallet_z_pocket,
                 ];
-
 
                 let mut plain_points_a_abs = plain_points_a;
                 let mut plain_points_b_abs = plain_points_b;
                 let mut plain_points_c_abs = plain_points_c;
                 let mut plain_points_d_abs = plain_points_d;
-
 
                 pointcloud_transform(
                     plain_points_a.as_mut_ptr(),
@@ -2138,21 +2429,20 @@ fn plot_marker(mut gizmos: Gizmos)
                     marker.pose.yaw,
                 );
 
-
-                        for x in (0..8)   {
-
-
+                for x in (0..8) {
                     gizmos.linestrip(
-                        [Vec3 {
-                            x: plain_points_a_abs[3*x + 0],
-                            y: plain_points_a_abs[3*x +1],
-                            z: plain_points_a_abs[3*x + 2],
-                        },
+                        [
                             Vec3 {
-                                x: plain_points_b_abs[3*x + 0],
-                                y: plain_points_b_abs[3*x +1],
-                                z: plain_points_b_abs[3*x + 2],
-                            }],
+                                x: plain_points_a_abs[3 * x + 0],
+                                y: plain_points_a_abs[3 * x + 1],
+                                z: plain_points_a_abs[3 * x + 2],
+                            },
+                            Vec3 {
+                                x: plain_points_b_abs[3 * x + 0],
+                                y: plain_points_b_abs[3 * x + 1],
+                                z: plain_points_b_abs[3 * x + 2],
+                            },
+                        ],
                         Color::Rgba {
                             red: 0.0,
                             green: 1.0,
@@ -2161,18 +2451,19 @@ fn plot_marker(mut gizmos: Gizmos)
                         },
                     );
 
-
                     gizmos.linestrip(
-                        [Vec3 {
-                            x: plain_points_c_abs[3*x + 0],
-                            y: plain_points_c_abs[3*x +1],
-                            z: plain_points_c_abs[3*x + 2],
-                        },
+                        [
                             Vec3 {
-                                x: plain_points_d_abs[3*x + 0],
-                                y: plain_points_d_abs[3*x +1],
-                                z: plain_points_d_abs[3*x + 2],
-                            }],
+                                x: plain_points_c_abs[3 * x + 0],
+                                y: plain_points_c_abs[3 * x + 1],
+                                z: plain_points_c_abs[3 * x + 2],
+                            },
+                            Vec3 {
+                                x: plain_points_d_abs[3 * x + 0],
+                                y: plain_points_d_abs[3 * x + 1],
+                                z: plain_points_d_abs[3 * x + 2],
+                            },
+                        ],
                         Color::Rgba {
                             red: 1.0,
                             green: 0.0,
@@ -2180,14 +2471,13 @@ fn plot_marker(mut gizmos: Gizmos)
                             alpha: 0.5,
                         },
                     );
-
                 }
 
                 gizmos.linestrip(
-                    [0,1,2,3,0].map(|x|Vec3 {
-                        x: plain_points_a_abs[3*x + 0],
-                        y: plain_points_a_abs[3*x +1],
-                        z: plain_points_a_abs[3*x + 2],
+                    [0, 1, 2, 3, 0].map(|x| Vec3 {
+                        x: plain_points_a_abs[3 * x + 0],
+                        y: plain_points_a_abs[3 * x + 1],
+                        z: plain_points_a_abs[3 * x + 2],
                     }),
                     Color::Rgba {
                         red: 0.0,
@@ -2197,10 +2487,10 @@ fn plot_marker(mut gizmos: Gizmos)
                     },
                 );
                 gizmos.linestrip(
-                    [4,5,6,7,4].map(|x|Vec3 {
-                        x: plain_points_a_abs[3*x + 0],
-                        y: plain_points_a_abs[3*x +1],
-                        z: plain_points_a_abs[3*x + 2],
+                    [4, 5, 6, 7, 4].map(|x| Vec3 {
+                        x: plain_points_a_abs[3 * x + 0],
+                        y: plain_points_a_abs[3 * x + 1],
+                        z: plain_points_a_abs[3 * x + 2],
                     }),
                     Color::Rgba {
                         red: 0.0,
@@ -2210,10 +2500,10 @@ fn plot_marker(mut gizmos: Gizmos)
                     },
                 );
                 gizmos.linestrip(
-                    [0,1,2,3,0].map(|x|Vec3 {
-                        x: plain_points_b_abs[3*x + 0],
-                        y: plain_points_b_abs[3*x +1],
-                        z: plain_points_b_abs[3*x + 2],
+                    [0, 1, 2, 3, 0].map(|x| Vec3 {
+                        x: plain_points_b_abs[3 * x + 0],
+                        y: plain_points_b_abs[3 * x + 1],
+                        z: plain_points_b_abs[3 * x + 2],
                     }),
                     Color::Rgba {
                         red: 0.0,
@@ -2223,10 +2513,10 @@ fn plot_marker(mut gizmos: Gizmos)
                     },
                 );
                 gizmos.linestrip(
-                    [4,5,6,7,4].map(|x|Vec3 {
-                        x: plain_points_b_abs[3*x + 0],
-                        y: plain_points_b_abs[3*x +1],
-                        z: plain_points_b_abs[3*x + 2],
+                    [4, 5, 6, 7, 4].map(|x| Vec3 {
+                        x: plain_points_b_abs[3 * x + 0],
+                        y: plain_points_b_abs[3 * x + 1],
+                        z: plain_points_b_abs[3 * x + 2],
                     }),
                     Color::Rgba {
                         red: 0.0,
@@ -2237,10 +2527,10 @@ fn plot_marker(mut gizmos: Gizmos)
                 );
                 //
                 gizmos.linestrip(
-                    [0,1,2,3,0].map(|x|Vec3 {
-                        x: plain_points_c_abs[3*x + 0],
-                        y: plain_points_c_abs[3*x +1],
-                        z: plain_points_c_abs[3*x + 2],
+                    [0, 1, 2, 3, 0].map(|x| Vec3 {
+                        x: plain_points_c_abs[3 * x + 0],
+                        y: plain_points_c_abs[3 * x + 1],
+                        z: plain_points_c_abs[3 * x + 2],
                     }),
                     Color::Rgba {
                         red: 1.0,
@@ -2250,10 +2540,10 @@ fn plot_marker(mut gizmos: Gizmos)
                     },
                 );
                 gizmos.linestrip(
-                    [4,5,6,7,4].map(|x|Vec3 {
-                        x: plain_points_c_abs[3*x + 0],
-                        y: plain_points_c_abs[3*x +1],
-                        z: plain_points_c_abs[3*x + 2],
+                    [4, 5, 6, 7, 4].map(|x| Vec3 {
+                        x: plain_points_c_abs[3 * x + 0],
+                        y: plain_points_c_abs[3 * x + 1],
+                        z: plain_points_c_abs[3 * x + 2],
                     }),
                     Color::Rgba {
                         red: 1.0,
@@ -2263,10 +2553,10 @@ fn plot_marker(mut gizmos: Gizmos)
                     },
                 );
                 gizmos.linestrip(
-                    [0,1,2,3,0].map(|x|Vec3 {
-                        x: plain_points_d_abs[3*x + 0],
-                        y: plain_points_d_abs[3*x +1],
-                        z: plain_points_d_abs[3*x + 2],
+                    [0, 1, 2, 3, 0].map(|x| Vec3 {
+                        x: plain_points_d_abs[3 * x + 0],
+                        y: plain_points_d_abs[3 * x + 1],
+                        z: plain_points_d_abs[3 * x + 2],
                     }),
                     Color::Rgba {
                         red: 1.0,
@@ -2276,10 +2566,10 @@ fn plot_marker(mut gizmos: Gizmos)
                     },
                 );
                 gizmos.linestrip(
-                    [4,5,6,7,4].map(|x|Vec3 {
-                        x: plain_points_d_abs[3*x + 0],
-                        y: plain_points_d_abs[3*x +1],
-                        z: plain_points_d_abs[3*x + 2],
+                    [4, 5, 6, 7, 4].map(|x| Vec3 {
+                        x: plain_points_d_abs[3 * x + 0],
+                        y: plain_points_d_abs[3 * x + 1],
+                        z: plain_points_d_abs[3 * x + 2],
                     }),
                     Color::Rgba {
                         red: 1.0,
@@ -2288,7 +2578,6 @@ fn plot_marker(mut gizmos: Gizmos)
                         alpha: 0.5,
                     },
                 );
-
             }
 
             let mut p1 = [1.0f32, 0.0, 0.0];
@@ -2727,6 +3016,31 @@ Click Reser to clear current indexes.
                 ui.label(format!("Count: {}", dds_msg_count));
             });
         });
+    egui::Window::new("Pallet").resizable(true).show(ctx, |ui| {
+        let detected_pallets_len = GLOBAL_DATA
+            .get()
+            .unwrap()
+            .detected_pallets
+            .lock()
+            .unwrap()
+            .len();
+
+        if (detected_pallets_len > 0) {
+            ui.vertical(|ui| {
+                for p in GLOBAL_DATA
+                    .get()
+                    .unwrap()
+                    .detected_pallets
+                    .lock()
+                    .unwrap()
+                    .iter()
+                {
+                    ui.label(format!("{:?}", p));
+                    ui.separator();
+                }
+            });
+        }
+    });
     egui::Window::new("Marker").resizable(true).show(ctx, |ui| {
         if ui.button("Add").clicked() {
             GLOBAL_DATA

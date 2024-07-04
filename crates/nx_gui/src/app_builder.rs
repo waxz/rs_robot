@@ -1,12 +1,14 @@
 use nx_common::common::signal_handler::SignalHandler;
 use std::f32::consts::PI;
 //BEVY
+use bevy::window::PrimaryWindow;
 use bevy_mod_raycast::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin, TouchControls};
 
 use bevy::app::AppExit;
 use bevy::pbr::CascadeShadowConfigBuilder;
 use bevy::render::camera::RenderTarget;
+use bevy::render::view::screenshot::ScreenshotManager;
 use bevy::window::WindowRef;
 use bevy::winit::WinitWindows;
 use bevy::{
@@ -70,9 +72,26 @@ pub fn create_bevy_app(bg_color: [f32; 3], winit_wait_ms: [u64; 2]) -> App
     .add_systems(Update, bevy::window::close_on_esc)
     .add_systems(Startup, setup_window_camera)
     .add_systems(Update, camera_keyboard_controls)
+    .add_systems(Update, screenshot_on_spacebar)
     .add_systems(Update, window_exit);
 
     app
+}
+
+fn screenshot_on_spacebar(
+    input: Res<ButtonInput<KeyCode>>,
+    main_window: Query<Entity, With<PrimaryWindow>>,
+    mut screenshot_manager: ResMut<ScreenshotManager>,
+    mut counter: Local<u32>,
+)
+{
+    if input.just_pressed(KeyCode::Space) {
+        let path = format!("./screenshot-{}.png", *counter);
+        *counter += 1;
+        screenshot_manager
+            .save_screenshot_to_disk(main_window.single(), path)
+            .unwrap();
+    }
 }
 
 // This is how you can change config at runtime.

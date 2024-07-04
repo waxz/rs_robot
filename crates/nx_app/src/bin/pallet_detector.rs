@@ -1,24 +1,26 @@
 use nx_common::common::math::Point3f;
 use nx_common::common::signal_handler::SignalHandler;
+use nx_common::common::task::TaskManager;
 use nx_common::common::thread::Thread;
 use nx_common::common::types::UnsafeSender;
-use nx_message_center::base::common_message::shared::{PointCloud2,HeaderString,Path,PoseStamped};
+use nx_message_center::base::common_message::shared::{
+    HeaderString, Path, PointCloud2, PoseStamped,
+};
 use nx_message_center::base::pointcloud_process::perception::{
     pointcloud_clip, pointcloud_transform,
 };
-use nx_common::common::task::TaskManager;
 use nx_message_center::base::{common_message, message_handler, pointcloud_process, tiny_alloc};
 
 use itertools::{izip, Itertools};
 
+use std::cell::RefCell;
 use std::f32::consts::{PI, TAU};
 use std::f64::consts::FRAC_PI_2;
 use std::ffi::c_void;
 use std::io::Write;
 use std::ops::{BitAnd, Deref};
-use std::{fs, slice};
-use std::cell::RefCell;
 use std::rc::Rc;
+use std::{fs, slice};
 use time::{Duration, OffsetDateTime, UtcOffset};
 
 use rand::{thread_rng, Rng};
@@ -58,8 +60,10 @@ struct Args
     dds_config: String,
     #[arg(short, long, default_value = "/tmp/logs")]
     log_dir: String,
-    #[arg(short, long, default_value_t = 50)]
-    sleep_ms: u64,
+    #[arg(short, long, default_value_t = 100.0)]
+    task_fps: f32,
+    #[arg(short, long, default_value_t = false)]
+    check_stamp: bool,
 }
 
 pub(crate) mod params
@@ -176,8 +180,8 @@ pub(crate) mod params
     #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
     pub struct CloudConfig
     {
-        pub  dim: CloudDimConfig,
-        pub  filter: CloudFilterConfig,
+        pub dim: CloudDimConfig,
+        pub filter: CloudFilterConfig,
     }
     #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
     pub struct CloudFilterConfig
@@ -203,7 +207,7 @@ pub(crate) mod params
     #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
     pub struct CloudDimConfig
     {
-        pub  height: usize,
+        pub height: usize,
         pub width: usize,
     }
     #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
@@ -215,7 +219,7 @@ pub(crate) mod params
     #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
     pub struct Pose
     {
-        pub       tx: f32,
+        pub tx: f32,
         pub ty: f32,
         pub tz: f32,
         pub roll: f32,
@@ -236,22 +240,42 @@ pub(crate) mod io_message
     use serde::{Deserialize, Serialize, Serializer};
 
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct AppCmd {}
+    pub struct AppCmdBase
+    {
+        pub cmd_type: String,
+        pub detect_cmd: Option<AppCmdDetect>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct AppCmdData
+    {
+        pub data: AppCmdBase,
+    }
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct AppCmdDetect
+    {
+        pub task_id: String,
+        pub retry_count: u32,
+    }
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct AppCmdConfig {}
+
     #[derive(Debug, Serialize, Deserialize)]
     pub struct PalletPose
     {
-        tx: f64,
-        ty: f64,
-        tz: f64,
-        roll: f64,
-        pitch: f64,
-        yaw: f64,
+        pub  tx: f64,
+        pub  ty: f64,
+        pub  tz: f64,
+        pub  roll: f64,
+        pub  pitch: f64,
+        pub  yaw: f64,
     }
     #[derive(Debug, Serialize, Deserialize)]
     pub struct PalletInfo
     {
-        pallet: PalletPose,
-        confidence: f64,
+        pub  pallet: PalletPose,
+        pub  confidence: f32,
+        pub info : i32,
     }
 
     #[derive(Debug, Serialize, Deserialize)]
@@ -259,14 +283,18 @@ pub(crate) mod io_message
     {
         pub cloud_message_count: u64,
         pub boot_up_time: String,
+        pub cycle_time: String,
+        pub max_cycle_time: String,
         pub current_time: String,
         pub up_duration: String,
     }
     #[derive(Debug, Serialize, Deserialize)]
     pub struct AppStatusTask
     {
-        pub task_id: String,
-        pub state: String,
+        pub process: String,
+        pub process_result: String,
+
+        // pub task_id: String,
         pub success_count: u64,
         pub fail_count: u64,
         pub last_success_task_id: String,
@@ -280,6 +308,7 @@ pub(crate) mod io_message
     {
         pub statistic: AppStatusStatistic,
         pub task: AppStatusTask,
+        pub detect_task: AppCmdDetect,
     }
 }
 
@@ -287,11 +316,16 @@ fn main()
 {
     println!("what's up");
     let args = Args::parse();
+    println!("args: {:?}", args);
 
     let tz_offset = nx_common::common::time::get_timezone_offset();
 
     let boot_up_time = get_now_local();
+    let mut last_current_time = get_now_local();
     let mut current_time = get_now_local();
+    let mut cycle_time = current_time - last_current_time;
+    let mut max_cycle_time = cycle_time;
+
     let up_duration = get_now_local() - boot_up_time;
 
     let time_fmt = OffsetTime::new(
@@ -315,6 +349,35 @@ fn main()
     // let wheel_file_appender = LogFileInitializer { directory: &args.log_dir, filename: &current_file_name, max_n_old_files: 2, preferred_max_file_size_mib: 1, }.init().unwrap();
 
     let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
+
+    let subscriber = Registry::default()
+        .with(
+            fmt::Layer::default()
+                .with_writer(file_writer)
+                .with_ansi(false)
+                .with_line_number(true)
+                .with_thread_ids(true)
+                .with_file(true)
+                .with_timer(time_fmt.clone())
+                .with_filter(filter::LevelFilter::WARN), // .with_filter(filter::filter_fn(|metadata| {
+                                                         //     // println!("metadata:{:?}",metadata);
+                                                         //     // *metadata.level() == filter::LevelFilter::ERROR
+                                                         //     metadata.target().starts_with("hello")
+                                                         // }))
+        )
+        .with(
+            fmt::Layer::default()
+                .with_writer(std::io::stdout)
+                .with_line_number(true)
+                .with_file(true)
+                .with_thread_ids(true)
+                .with_timer(time_fmt.clone())
+                .with_filter(filter::LevelFilter::INFO),
+        );
+
+    tracing::subscriber::set_global_default(subscriber).expect("unable to set global subscriber");
+
+    info!("start program");
 
     let memory_pool_base = nx_common::common::memory::get_next_aligned_addr(
         unsafe { TA_BUFFER.as_ptr() } as *mut _,
@@ -350,10 +413,10 @@ fn main()
         }
     }
 
-    let mut dds_handler=
-    Rc::new(RefCell::new(  message_handler::MessageHandler::new("dds")))
-      ;
-    let ok = dds_handler.borrow_mut().create(args.dds_config.as_str(), *allocator.cfg.get());
+    let mut dds_handler = Rc::new(RefCell::new(message_handler::MessageHandler::new("dds")));
+    let ok = dds_handler
+        .borrow_mut()
+        .create(args.dds_config.as_str(), *allocator.cfg.get());
 
     if !ok {
         println!("exit");
@@ -369,7 +432,6 @@ fn main()
         }
     }
 
-
     let cloud_dim = app_config.pallet_detector.cloud.dim;
     let mut mean_window_filter_max = app_config.pallet_detector.cloud.filter.mean_window_len;
     let mut enable_mean_window = app_config.pallet_detector.cloud.filter.enable_mean_window;
@@ -377,6 +439,9 @@ fn main()
     let mut mean_window_filter_count_reach = !enable_mean_window;
     let mean_window_jump_max = app_config.pallet_detector.cloud.filter.mean_window_jump_max;
 
+    let mut new_cloud_ready = Rc::new(RefCell::new(false));
+    let mut start_detect_cmd = Rc::new(RefCell::new(false));
+    let mut cloud_msg_count = Rc::new(RefCell::new(0u64));
 
     let mut raw_float_vec =
         allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
@@ -386,12 +451,13 @@ fn main()
     let mut transform_float_vec =
         allocator.alloc_as_array::<f32>((cloud_dim.width * cloud_dim.height * 3) as usize);
 
+    let mut pallet_detector_handler = Rc::new(RefCell::new(
+        pointcloud_process::perception::PointcloudPalletDetector::new(),
+    ));
 
-
-    let mut pallet_detector_handler =
-       Rc::new(RefCell::new(pointcloud_process::perception::PointcloudPalletDetector::new() )) ;
-
-    let ok = pallet_detector_handler.borrow_mut().create(args.dds_config.as_str(), *allocator.cfg.get());
+    let ok = pallet_detector_handler
+        .borrow_mut()
+        .create(args.dds_config.as_str(), *allocator.cfg.get());
 
     if !ok {
         println!("exit");
@@ -401,179 +467,276 @@ fn main()
     let mut signal = SignalHandler::default();
 
     let mut detector_cmd_buffer = allocator.alloc_as_array::<*mut c_void>(100 as usize);
-    let mut send_status = HeaderString::new(
-        1024,
-        *allocator.cfg.get(),
-    );
+    let mut send_status = Rc::new(RefCell::new(HeaderString::new(1024, *allocator.cfg.get())));
 
-    send_status.set_frame_id("BootUp");
-    send_status.set_data("ok");
+    send_status.borrow_mut().set_frame_id("BootUp");
+    send_status.borrow_mut().set_data("ok");
 
-    let mut send_result =
-        Path::new(2, *allocator.cfg.get());
+    let mut send_result = Path::new(2, *allocator.cfg.get());
     send_result.set_frame_id("BootUp");
     {
-
         let mut send_result_poses = send_result.get_mut_data();
         send_result_poses[0].position.x = 0.0;
-
     }
-    let mut send_result_buffer = [*send_result.get_ptr() as *mut std::os::raw::c_void];
-    let mut send_status_buffer = [*send_status.get_ptr() as *mut std::os::raw::c_void];
 
     let mut signal = SignalHandler::default();
 
-    let mut app_status_data = io_message::AppStatus {
+    let mut app_status_data = Rc::new(RefCell::new(io_message::AppStatus {
         statistic: io_message::AppStatusStatistic {
             cloud_message_count: 0,
 
             boot_up_time: format!("{}", boot_up_time),
+            cycle_time: "".to_string(),
+            max_cycle_time: "".to_string(),
             current_time: format!("{}", boot_up_time),
             up_duration: format!("{}", up_duration),
         },
         task: io_message::AppStatusTask {
-            task_id: "".to_string(),
-            state: "BootUp".to_string(),
+            process: "".to_string(),
             success_count: 0,
             fail_count: 0,
             last_success_task_id: "".to_string(),
             last_fail_task_id: "".to_string(),
             message: "".to_string(),
             pallet_result: vec![],
+            process_result: "".to_string(),
         },
-    };
+        detect_task: io_message::AppCmdDetect {
+            task_id: "".to_string(),
+            retry_count: 0,
+        },
+    }));
 
-
-    let mut task_manager = TaskManager::new(20,20.0,0);
+    let mut task_manager = TaskManager::new(20, args.task_fps, 0);
 
     {
-
-
         let dds_handler = dds_handler.clone();
+        let new_cloud_ready = new_cloud_ready.clone();
+        let start_detect_cmd = start_detect_cmd.clone();
+        let send_status = send_status.clone();
+        let app_status_data = app_status_data.clone();
 
-        task_manager.add("recv_msg", move|| {
+        task_manager.add(
+            "recv_cmd",
+            move || {
+                let mut current_time = get_now_local();
 
-            //---- recv cmd
-            let mut binding = dds_handler.borrow_mut();
-            let recv_cmd = binding.read_data(c"detector_cmd_sub");
-            for m in recv_cmd.iter(){
-                let msg: HeaderString = HeaderString::from_ptr(*m);
-                let timestamp_u64 = msg.get_stamp();
-                let stamp = nx_common::common::time::get_local_from_ns(timestamp_u64 as i128);
+                //---- recv cmd
+                let mut app_status_data_binding = app_status_data.borrow_mut();
+                let mut send_status_biding = send_status.borrow_mut();
+
+                let mut dds_handler_binding = dds_handler.borrow();
+                let recv_cmd = dds_handler_binding.read_data(c"detector_cmd_sub");
+                for m in recv_cmd.iter() {
+                    let msg: HeaderString = HeaderString::from_ptr(*m);
+                    let timestamp_u64 = msg.get_stamp();
+                    let stamp = nx_common::common::time::get_local_from_ns(timestamp_u64 as i128);
+
+                    let stamp_valid = (!args.check_stamp)
+                        || ((stamp > boot_up_time)
+                            && ((current_time - stamp).as_seconds_f32().abs() < 0.5));
+                    println!("recv_cmd: stamp_valid: {}, stamp: {}", stamp_valid, stamp);
+
+                    if (stamp_valid) {
+                        let data = msg.get_data();
+                        println!("recv_cmd, stamp: {}, data: {:?}", stamp, data);
+
+                        app_status_data_binding.task.pallet_result.clear();
 
 
-                let data = msg.get_data();
-                println!("recv_cmd, stamp: {}, data: {:?}",stamp, data);
+                        app_status_data_binding.task.process = "ParseCommand".to_string();
+                        match toml::from_str::<io_message::AppCmdBase>(&data) {
+                            Ok(mut t) => match t.cmd_type.as_str() {
+                                "DetectPallet" => match t.detect_cmd {
+                                    Some(mut t) => {
+                                        t.retry_count = t.retry_count.max(1).min(5);
 
+                                        if( t.task_id == app_status_data_binding.detect_task.task_id){
+                                            app_status_data_binding.detect_task = t;
+                                            app_status_data_binding.task.process_result =
+                                                "Fail".to_string();
+                                            app_status_data_binding.task.message = format!("Repeating task_id: {}", t.task_id);
+                                            app_status_data_binding.detect_task.retry_count = 0;
+                                        }else {
+                                            app_status_data_binding.detect_task = t;
+                                            app_status_data_binding.task.process_result =
+                                                "Success".to_string();
+                                            app_status_data_binding.task.message = "Success".to_string();
+                                        }
 
+                                    }
+                                    _ => {
+                                        app_status_data_binding.task.process_result =
+                                            "Fail".to_string();
+                                        app_status_data_binding.task.message = format!(
+                                            "undefined detect_task error: [{}]",
+                                            t.cmd_type
+                                        );
+                                        app_status_data_binding.detect_task.retry_count = 0;
+                                    }
+                                },
+                                _ => {
+                                    app_status_data_binding.task.process_result = "Fail".to_string();
+                                    app_status_data_binding.task.message =
+                                        format!("undefined cmd_type error: [{}]", t.cmd_type);
+                                    app_status_data_binding.detect_task.retry_count = 0;
 
-            }
-            true
-        },100.0);
+                                }
+                            },
+                            Err(e) => {
+                                info!("parse error {}", e);
+
+                                app_status_data_binding.task.process_result = "Fail".to_string();
+                                app_status_data_binding.task.message =
+                                    format!("parse data error: {:?}", e);
+                                app_status_data_binding.detect_task.retry_count = 0;
+
+                            }
+                        }
+                        let app_status_data_str =
+                            toml::to_string(&*app_status_data_binding).unwrap();
+
+                        send_status_biding.set_data(app_status_data_str.as_str());
+                        info!("send app_status_data_str: {}", app_status_data_str.as_str());
+
+                        dds_handler_binding.write_data(
+                            c"detector_status_pub",
+                            &mut [*send_status_biding.get_ptr() as *mut std::os::raw::c_void],
+                        );
+                    }
+                }
+
+                if( !*start_detect_cmd.borrow() &&  app_status_data_binding.detect_task.retry_count > 0){
+                    info!("detector needs to run");
+                    app_status_data_binding.task.process = "RunningDetector".to_string();
+                    app_status_data_binding.task.process_result = "Running".to_string();
+                    app_status_data_binding.task.message = "".to_string();
+
+                    *start_detect_cmd.borrow_mut() = true;
+                }
+
+                true
+            },
+            100.0,
+        );
     }
 
     {
-
-
         let filter = app_config.pallet_detector.cloud.filter;
         let extrinsic = app_config.pallet_detector.extrinsic;
         let dds_handler = dds_handler.clone();
         let mut pallet_detector_handler = pallet_detector_handler.clone();
+        let new_cloud_ready = new_cloud_ready.clone();
+        let start_detect_cmd = start_detect_cmd.clone();
+        let cloud_msg_count = cloud_msg_count.clone();
 
+        let boot_up_time = boot_up_time;
 
-        task_manager.add("recv_cloud", move|| {
+        let args = args;
 
-            //---- recv cmd
-            let mut binding = dds_handler.borrow_mut();
-            let recv_cloud = binding.read_data(c"cloud_sub");
-            for m in recv_cloud.iter(){
-                let data: PointCloud2 = PointCloud2::from_ptr(*m);
-
-                let timestamp_u64 = data.get_stamp();
-                let stamp =
-                    OffsetDateTime::from_unix_timestamp_nanos(timestamp_u64 as i128)
-                        .unwrap();
-                let stamp = nx_common::common::time::get_local_from_ns(timestamp_u64 as i128);
-
-                println!("recv cloud: stamp: {}",stamp);
-
-                let current_stamp = OffsetDateTime::now_utc();
-
-                let stamp_diff = current_stamp - stamp;
-
-                let stamp_diff_s = stamp_diff.as_seconds_f32();
-                let stamp_local = stamp.to_offset(tz_offset);
-                let stamp_valid = (stamp_diff_s.abs() < 1.0);
-
-                let frame_id = data.get_frame_id();
-                let cloud_float_vec = data.get_data();
-
-                let cloud_height_width = data.get_height_width();
-
-
-                let cloud_dim_height = filter.filter_height_max
-                    - filter.filter_height_min;
+        task_manager.add(
+            "recv_cloud",
+            move || {
+                let cloud_dim_height = filter.filter_height_max - filter.filter_height_min;
 
                 let cloud_dim_width = (filter.filter_width_max - filter.filter_width_min);
-                let float_vec_len = cloud_dim_height
-                    * cloud_dim_width
-                    * 3;
-                raw_float_vec = allocator
-                    .realloc_as_array::<f32>(raw_float_vec, float_vec_len as usize);
-                transform_float_vec = allocator.realloc_as_array::<f32>(
-                    transform_float_vec,
-                    float_vec_len as usize,
-                );
-                mean_filter_float_vec = allocator.realloc_as_array::<f32>(
-                    mean_filter_float_vec,
-                    float_vec_len as usize,
-                );
-                if (enable_mean_window){
-                    pointcloud_clip(
-                        cloud_float_vec.as_ptr() as *mut _,
-                        cloud_height_width[0] as u64,
-                        cloud_height_width[1] as u64,
-                        mean_filter_float_vec.as_mut_ptr(),
-                        filter.filter_height_min,
-                        filter.filter_height_max,
-                        filter.filter_width_min,
-                        filter.filter_width_max,
-                    );
 
-                    pointcloud_process::perception::pointcloud_mean_filter(
-                        mean_filter_float_vec.as_mut_ptr(),
-                        float_vec_len / 3,
-                        raw_float_vec.as_mut_ptr(),
-                        &mut mean_window_filter_count,
-                        mean_window_jump_max,
-                    );
-                    mean_window_filter_count_reach =
-                        mean_window_filter_count == mean_window_filter_max;
+                //---- recv cmd
+                let mut binding = dds_handler.borrow_mut();
+                let recv_cloud = binding.read_data(c"cloud_sub");
 
-                    if mean_window_filter_count_reach {
-                        mean_window_filter_count = 0;
+                let mut current_time = get_now_local();
+
+                for m in recv_cloud.iter() {
+                    let data: PointCloud2 = PointCloud2::from_ptr(*m);
+
+                    let timestamp_u64 = data.get_stamp();
+                    let stamp =
+                        OffsetDateTime::from_unix_timestamp_nanos(timestamp_u64 as i128).unwrap();
+                    let stamp = nx_common::common::time::get_local_from_ns(timestamp_u64 as i128);
+
+                    let stamp_valid = (!args.check_stamp)
+                        || ((stamp > boot_up_time)
+                            && ((current_time - stamp).as_seconds_f32().abs() < 0.5));
+                    // info!("recv_cloud: stamp_valid: {}, stamp: {}", stamp_valid, stamp);
+
+                    *cloud_msg_count.borrow_mut() += stamp_valid as u64;
+                    if (!*start_detect_cmd.borrow()) {
+                        *new_cloud_ready.borrow_mut() = false;
+                        return true;
                     }
 
-                }else{
-                    pointcloud_clip(
-                        cloud_float_vec.as_ptr() as *mut _,
-                        cloud_height_width[0] as u64,
-                        cloud_height_width[1] as u64,
-                        raw_float_vec.as_mut_ptr(),
-                        filter.filter_height_min,
-                        filter.filter_height_max,
-                        filter.filter_width_min,
-                        filter.filter_width_max,
-                    );
-                    mean_window_filter_count_reach = true;
+                    let current_stamp = OffsetDateTime::now_utc();
+
+                    let stamp_diff = current_stamp - stamp;
+
+                    let stamp_diff_s = stamp_diff.as_seconds_f32();
+                    let stamp_local = stamp.to_offset(tz_offset);
+                    let stamp_valid = (stamp_diff_s.abs() < 1.0);
+
+                    let frame_id = data.get_frame_id();
+                    let cloud_float_vec = data.get_data();
+
+                    let cloud_height_width = data.get_height_width();
+
+                    let float_vec_len = cloud_dim_height * cloud_dim_width * 3;
+                    raw_float_vec =
+                        allocator.realloc_as_array::<f32>(raw_float_vec, float_vec_len as usize);
+                    transform_float_vec = allocator
+                        .realloc_as_array::<f32>(transform_float_vec, float_vec_len as usize);
+                    mean_filter_float_vec = allocator
+                        .realloc_as_array::<f32>(mean_filter_float_vec, float_vec_len as usize);
+
+                    info!("process_cloud: enable_mean_window: {}, filter: {:?}", enable_mean_window, filter);
+
+                    if (enable_mean_window) {
+                        pointcloud_clip(
+                            cloud_float_vec.as_ptr() as *mut _,
+                            cloud_height_width[0] as u64,
+                            cloud_height_width[1] as u64,
+                            mean_filter_float_vec.as_mut_ptr(),
+                            filter.filter_height_min,
+                            filter.filter_height_max,
+                            filter.filter_width_min,
+                            filter.filter_width_max,
+                        );
+
+                        pointcloud_process::perception::pointcloud_mean_filter(
+                            mean_filter_float_vec.as_mut_ptr(),
+                            float_vec_len / 3,
+                            raw_float_vec.as_mut_ptr(),
+                            &mut mean_window_filter_count,
+                            mean_window_jump_max,
+                        );
+                        mean_window_filter_count_reach =
+                            mean_window_filter_count >= mean_window_filter_max;
+
+                        if mean_window_filter_count_reach {
+                            mean_window_filter_count = 0;
+                        }
+                    } else {
+                        pointcloud_clip(
+                            cloud_float_vec.as_ptr() as *mut _,
+                            cloud_height_width[0] as u64,
+                            cloud_height_width[1] as u64,
+                            raw_float_vec.as_mut_ptr(),
+                            filter.filter_height_min,
+                            filter.filter_height_max,
+                            filter.filter_width_min,
+                            filter.filter_width_max,
+                        );
+                        mean_window_filter_count_reach = true;
+                    }
                 }
 
-                if(mean_window_filter_count_reach){
+                if (mean_window_filter_count_reach) {
+                    mean_window_filter_count = 0;
+                    *new_cloud_ready.borrow_mut() = true;
 
                     pointcloud_transform(
-                        raw_float_vec.as_mut_ptr() ,
+                        raw_float_vec.as_mut_ptr(),
                         (raw_float_vec.len() as u64) / 3,
-                        transform_float_vec.as_mut_ptr() ,
+                        transform_float_vec.as_mut_ptr(),
                         extrinsic.pose.tx,
                         extrinsic.pose.ty,
                         extrinsic.pose.tz,
@@ -590,55 +753,135 @@ fn main()
                         extrinsic.pose.ty,
                         extrinsic.pose.tz,
                     );
-
-                    pallet_detector_handler.borrow_mut().filter_ground(1);
-                    pallet_detector_handler.borrow_mut().filter_vertical(1);
-                    pallet_detector_handler.borrow_mut().filter_pallet(30);
-
-
-
-
-
                 }
 
-
-            }
-
-            true
-        },100.0);
+                true
+            },
+            100.0,
+        );
     }
 
     {
         let dds_handler = dds_handler.clone();
-        task_manager.add("update_status",move||{
-            current_time = get_now_local();
-            app_status_data.statistic.current_time = format!("{}", current_time);
-            app_status_data.statistic.up_duration = format!("{}", current_time - boot_up_time);
+        let mut pallet_detector_handler = pallet_detector_handler.clone();
 
+        let start_detect_cmd = start_detect_cmd.clone();
+        let new_cloud_ready = new_cloud_ready.clone();
+        let app_status_data = app_status_data.clone();
 
-            let app_status_data_str = toml::to_string(&app_status_data).unwrap();
-            // println!("send_status, data: {:?}",app_status_data_str);
+        task_manager.add(
+            "detect",
+            move || {
+                let mut app_status_data_binding = app_status_data.borrow_mut();
 
-            send_status.set_data(app_status_data_str.as_str());
-            {
+                // info!("run_detector: start_detect_cmd: {}, new_cloud_ready: {}",*start_detect_cmd.borrow(),*new_cloud_ready.borrow() );
 
-                let mut send_result_poses = send_result.get_mut_data();
-                send_result_poses[0].position.x = send_result_poses[0].position.x + 1.0;
+                let mut detect_ok = false;
+                if *start_detect_cmd.borrow() && app_status_data_binding.detect_task.retry_count > 0 && *new_cloud_ready.borrow() {
+                    *new_cloud_ready.borrow_mut() = false;
+                    let mut binding = pallet_detector_handler.borrow_mut();
+                    binding.filter_ground(1);
+                    binding.filter_vertical(1);
+                    binding.filter_pallet(1);
 
-            }
-            dds_handler.borrow_mut().write_data(c"detector_result_pub", &mut [*send_result.get_ptr() as *mut std::os::raw::c_void]);
-            dds_handler.borrow_mut().write_data(c"detector_status_pub", &mut [*send_status.get_ptr() as *mut std::os::raw::c_void], );
+                    let pallet_buffer = binding.get_pallet(0);
+                    info!("pallet_buffer_len: {}",pallet_buffer.len());
+                    app_status_data_binding.task.pallet_result.clear();
+                    if (pallet_buffer.len() > 0) {
 
-            true
-        },100.0);
+                        for p in pallet_buffer.iter(){
+                            app_status_data_binding.task.pallet_result.push(io_message::PalletInfo {
+                                pallet: io_message::PalletPose {
+                                    tx: p.tx,
+                                    ty: p.ty,
+                                    tz: p.tz,
+                                    roll: p.roll,
+                                    pitch: p.pitch,
+                                    yaw: p.yaw,
+                                },
+                                confidence: p.confidence,
+                                info: p.info,
+                            });
+
+                        }
+                        app_status_data_binding.task.success_count += 1;
+                        app_status_data_binding.detect_task.retry_count = 0;
+                        detect_ok = true;
+                    }else{
+                        app_status_data_binding.task.fail_count += 1;
+                        app_status_data_binding.detect_task.retry_count -=1;
+                    }
+
+                    if (app_status_data_binding.detect_task.retry_count == 0){
+                        *start_detect_cmd.borrow_mut() = false;
+                        if(detect_ok){
+                            app_status_data_binding.task.process_result = "Success".to_string();
+                            let task_id = app_status_data_binding.detect_task.task_id.clone();
+                            app_status_data_binding.task.last_success_task_id = task_id;
+
+                        }else{
+                            app_status_data_binding.task.process_result = "Fail".to_string();
+                            let task_id = app_status_data_binding.detect_task.task_id.clone();
+                            app_status_data_binding.task.last_fail_task_id = task_id;
+                        }
+                    }
+                }
+                true
+            },
+            100.0,
+        );
     }
 
+    {
+        let dds_handler = dds_handler.clone();
+        current_time = get_now_local();
+        last_current_time = current_time;
+        let cloud_msg_count = cloud_msg_count.clone();
+        let app_status_data = app_status_data.clone();
 
+        task_manager.add(
+            "update_status",
+            move || {
+
+
+                current_time = get_now_local();
+                let mut app_status_data_binding = app_status_data.borrow_mut();
+                app_status_data_binding.statistic.current_time = format!("{}", current_time);
+                app_status_data_binding.statistic.up_duration =
+                    format!("{}", current_time - boot_up_time);
+                cycle_time = current_time - last_current_time;
+                last_current_time = current_time;
+                max_cycle_time = max_cycle_time.max(cycle_time);
+                app_status_data_binding.statistic.cycle_time = format!("{}", cycle_time);
+                app_status_data_binding.statistic.max_cycle_time = format!("{}", max_cycle_time);
+                app_status_data_binding.statistic.cloud_message_count = *cloud_msg_count.borrow();
+
+                let app_status_data_str = toml::to_string(&*app_status_data_binding).unwrap();
+
+                send_status
+                    .borrow_mut()
+                    .set_data(app_status_data_str.as_str());
+                {
+                    let mut send_result_poses = send_result.get_mut_data();
+                    send_result_poses[0].position.x = send_result_poses[0].position.x + 1.0;
+                }
+                dds_handler.borrow_mut().write_data(
+                    c"detector_result_pub",
+                    &mut [*send_result.get_ptr() as *mut std::os::raw::c_void],
+                );
+                dds_handler.borrow_mut().write_data(
+                    c"detector_status_pub",
+                    &mut [*send_status.borrow_mut().get_ptr() as *mut std::os::raw::c_void],
+                );
+
+
+                true
+            },
+            100.0,
+        );
+    }
 
     while signal.is_run() {
-
         task_manager.run();
-
-
     }
 }
