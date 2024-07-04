@@ -62,7 +62,7 @@ impl MessageHandler
         unsafe { ptr.is_ok.unwrap()(ptr.deref() as *const _ as *mut _) }
     }
 
-    pub fn write_data(&mut self, channel_name: &CStr, buffer: &mut [*mut c_void]) -> c_int
+    pub fn write_data(&self, channel_name: &CStr, buffer: &mut [*mut c_void]) -> c_int
     {
         // // let channel_name = CString::new(channel_name).unwrap();
         // let mut channel_name_vec: [c_char; 50] = [0; 50];
@@ -125,7 +125,7 @@ impl MessageHandler
         //     Some()
         // }
     }
-    pub fn read_data(&mut self, channel_name: &CStr) -> &[*mut c_void]
+    pub fn read_data(&self, channel_name: &CStr) -> &[*mut c_void]
     {
         // let mut channel_name_vec: [c_char; 50] = [0; 50];
         // unsafe{

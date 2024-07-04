@@ -1,14 +1,29 @@
 pub mod perception
 {
-    use crate::binding::{pointcloud_pallet_detector_t, ta_cfg_t};
+    use crate::binding::{pointcloud_pallet_detector_t, ta_cfg_t, PalletInfo_ptr};
     use nx_common::common::types::UnsafeMutexSender;
     use std::ffi::CString;
     use std::ops::Deref;
     use std::ptr::null_mut;
+    use std::slice;
+
+    #[derive(Copy, Clone, Debug)]
+    pub struct PalletInfo
+    {
+        pub confidence: f32,
+        pub info: i32,
+        pub tx: f64,
+        pub ty: f64,
+        pub tz: f64,
+        pub roll: f64,
+        pub pitch: f64,
+        pub yaw: f64,
+    }
 
     pub struct PointcloudPalletDetector
     {
         handler: UnsafeMutexSender<pointcloud_pallet_detector_t>, //
+        pallets: Vec<PalletInfo>,
     }
     impl PointcloudPalletDetector
     {
@@ -18,6 +33,7 @@ pub mod perception
 
             Self {
                 handler: UnsafeMutexSender::new(ptr),
+                pallets: vec![],
             }
         }
 
@@ -308,6 +324,35 @@ pub mod perception
             } else {
                 unsafe { ((*ret).buffer, (*ret).float_num) }
             }
+        }
+        pub fn get_pallet(&mut self, output_mode: u32) -> &[PalletInfo]
+        {
+            let ptr = self.handler.get();
+
+            let recv_ptr =
+                unsafe { ptr.get_pallet.unwrap()(ptr.deref() as *const _ as *mut _, output_mode) };
+            self.pallets.clear();
+
+            if !recv_ptr.is_null() {
+                unsafe {
+                    let recv_data =
+                        slice::from_raw_parts((*recv_ptr).buffer, (*recv_ptr).pallet_num as usize);
+                    for p in recv_data {
+                        self.pallets.push(PalletInfo {
+                            confidence: p.confidence,
+                            info: p.info,
+                            tx: p.tx,
+                            ty: p.ty,
+                            tz: p.tz,
+                            roll: p.roll,
+                            pitch: p.pitch,
+                            yaw: p.yaw,
+                        })
+                    }
+                }
+            }
+
+            &self.pallets
         }
     }
 
