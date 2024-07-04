@@ -69,13 +69,18 @@ impl TaskManager
     }
     pub fn add<F: FnMut() -> bool + 'static>(&self, name: &str, f: F, sleeper_ms: f32)
     {
-        let mut prio = (sleeper_ms / self.sleeper_ms) as u64;
+        let mut prio = ((sleeper_ms / self.sleeper_ms).round()) as u64;
         let delay_us: u128 = (sleeper_ms * 1000.0) as u128;
 
         prio = prio.min(self.max_prio);
         let mut slot: u64 = 0;
 
-        slot = self.task_counter.borrow()[prio as usize] % (prio + 1);
+        if (prio > 0) {
+            slot = self.task_counter.borrow()[prio as usize] % (prio);
+        } else {
+            slot = 0;
+        }
+
         self.task_counter.borrow_mut()[prio as usize] += 1;
 
         // println!("add task");
@@ -136,8 +141,7 @@ impl TaskManager
             },
         ) in self.running_task.borrow_mut().iter_mut().enumerate()
         {
-            let toc = (*self.tic.borrow()) % (*prio + 1);
-            let toc_run = toc == *slot;
+            let toc_run = (*prio == 0) || ((*self.tic.borrow()) % (*prio) == *slot);
 
             let is_lazy_task = *prio == self.max_prio;
             let is_lazy_task_toc = is_lazy_task && stamp.elapsed().as_micros() > *delay_us;
