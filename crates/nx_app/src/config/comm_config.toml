@@ -10,18 +10,6 @@ version = 1
 [ros.config]
 __name = "ros_motion_control"
 
-#[base.channel.scan_pub]
-#channel_type = "pub"
-#topic_name = "scan"
-#topic_type = "LaserScan"
-#qos_queue_size = 1
-#
-#[base.channel.scan_sub]
-#channel_type = "sub"
-#topic_name = "scan"
-#topic_type = "LaserScan"
-#qos_queue_size = 10
-
 
 
 [ros.writers.twist_pub]

@@ -17,7 +17,7 @@ path_arrow_len = 0.1
 test_relative_start = [0.1,0.0,0.0]
 
 [ros_config]
-# simalation
+# enable simalation, publish tf
 sim_config = { enable = false, forward_vel_max = 1.5, forward_acc = 1.0, rotate_angle_max = 2.5, rotate_vel = 1.5 }
 
 tf_timeout_s = 0.5
@@ -208,7 +208,8 @@ front_control_point = [0.1, 0.0, 0.0]
 front_control_point_low_error = [0.02, 0.0, 0.0]
 
 use_rear_control_point = true
-rear_control_point = [-0.1, 0.0, 0.0, 0.0]
+# set control point
+rear_control_point = [-0.2, 0.0, 0.0, 0.0]
 rear_control_point_low_error = [-0.02, 0.0, 0.0]
 
 
@@ -234,22 +235,22 @@ line_converge_y_acc = 0.05
 line_converge_y_min = 0.01
 line_converge_y = 0.02
 line_converge_yaw = 0.03
-line_converge_vel = 0.3
+line_converge_vel = 0.1
 
 
-track_curve_vel = 0.3
-track_curve_end_vel = 0.2
-track_curve_start_vel = 0.2
+track_curve_vel = 0.1
+track_curve_end_vel = 0.1
+track_curve_start_vel = 0.1
 track_curve_vel_decay_ratio = 5.0
 track_curve_vel_decay_min = 0.05
 curve_use_closest_direction_dist = 0.015
 
 track_curve_end_dist = 0.9
 goal_line_final = 1.0
-line_vel = 0.6
+line_vel = 0.2
 final_force_parallel_direction = false
 final_relative_target_x = 10.0
-goal_line_vel = 0.2
+goal_line_vel = 0.1
 constrain_stop_forward_vel_x_min = 0.001
 speed_down_acc = 0.1
 
@@ -289,7 +290,8 @@ track_curve_to_line_search_y = 0.1
 track_curve_smooth_direction_ratio = 0.5
 track_curve_smooth_direction_offset = 0.03
 
-track_final_line_prediction_normal = 2.5
+# final track
+track_final_line_prediction_normal = 5.5
 track_final_line_forward_vel_y_acc = 0.04
 track_final_line_forward_vel_x_max = 0.15
 track_final_line_forward_vel_y_max = 0.2
@@ -391,7 +393,8 @@ final_curve_predict_dist_max = 0.5
 [robot_motion_controller_config]
 model = "SingleSteering"
 default_option = "default"
-wheel_mount_pos = [[1.055, 0.0]]
+# define steering wheel mouting position
+wheel_mount_pos = [[1.048, 0.0]]
 #//SingleSteering:  [[forward_vel_range, forward_vel_acc],[rotate_angle_range, rotate_angle_vel]]
 wheel_control_limit = [[1.2, 0.6], [1.9, 0.9]]
 wheel_vel_limit = [1.1,0.4]

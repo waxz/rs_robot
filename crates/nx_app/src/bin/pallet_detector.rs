@@ -555,7 +555,7 @@ fn main()
                                             app_status_data_binding.detect_task = t;
                                             app_status_data_binding.task.process_result =
                                                 "Fail".to_string();
-                                            app_status_data_binding.task.message = format!("Repeating task_id: {}", t.task_id);
+                                            app_status_data_binding.task.message = format!("Repeating task_id: {}", app_status_data_binding.detect_task.task_id);
                                             app_status_data_binding.detect_task.retry_count = 0;
                                         }else {
                                             app_status_data_binding.detect_task = t;
@@ -733,26 +733,40 @@ fn main()
                     mean_window_filter_count = 0;
                     *new_cloud_ready.borrow_mut() = true;
 
-                    pointcloud_transform(
-                        raw_float_vec.as_mut_ptr(),
-                        (raw_float_vec.len() as u64) / 3,
-                        transform_float_vec.as_mut_ptr(),
-                        extrinsic.pose.tx,
-                        extrinsic.pose.ty,
-                        extrinsic.pose.tz,
-                        extrinsic.pose.roll,
-                        extrinsic.pose.pitch,
-                        extrinsic.pose.yaw,
-                    );
+                    if(extrinsic.enable){
+                        pointcloud_transform(
+                            raw_float_vec.as_mut_ptr(),
+                            (raw_float_vec.len() as u64) / 3,
+                            transform_float_vec.as_mut_ptr(),
+                            extrinsic.pose.tx,
+                            extrinsic.pose.ty,
+                            extrinsic.pose.tz,
+                            extrinsic.pose.roll,
+                            extrinsic.pose.pitch,
+                            extrinsic.pose.yaw,
+                        );
 
-                    pallet_detector_handler.borrow_mut().set_input(
-                        transform_float_vec.as_mut_ptr(),
-                        cloud_dim_height,
-                        cloud_dim_width,
-                        extrinsic.pose.tx,
-                        extrinsic.pose.ty,
-                        extrinsic.pose.tz,
-                    );
+                        pallet_detector_handler.borrow_mut().set_input(
+                            transform_float_vec.as_mut_ptr(),
+                            cloud_dim_height,
+                            cloud_dim_width,
+                            extrinsic.pose.tx,
+                            extrinsic.pose.ty,
+                            extrinsic.pose.tz,
+                        );
+                    }else{
+
+                        pallet_detector_handler.borrow_mut().set_input(
+                            raw_float_vec.as_mut_ptr(),
+                            cloud_dim_height,
+                            cloud_dim_width,
+                            0.0,
+                            0.0,
+                            0.0,
+                        );
+                    }
+
+
                 }
 
                 true
