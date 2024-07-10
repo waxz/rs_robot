@@ -295,6 +295,9 @@ pub(crate) mod io_message
         pub process_result: String,
 
         // pub task_id: String,
+        pub cmd_ok_count: u64,
+        pub cmd_nok_count: u64,
+
         pub success_count: u64,
         pub fail_count: u64,
         pub last_success_task_id: String,
@@ -500,6 +503,8 @@ fn main()
             message: "".to_string(),
             pallet_result: vec![],
             process_result: "".to_string(),
+            cmd_ok_count: 0,
+            cmd_nok_count: 0,
         },
         detect_task: io_message::AppCmdDetect {
             task_id: "".to_string(),
@@ -541,7 +546,6 @@ fn main()
                         let data = msg.get_data();
                         println!("recv_cmd, stamp: {}, data: {:?}", stamp, data);
 
-                        app_status_data_binding.task.pallet_result.clear();
 
 
                         app_status_data_binding.task.process = "ParseCommand".to_string();
@@ -552,16 +556,19 @@ fn main()
                                         t.retry_count = t.retry_count.max(1).min(5);
 
                                         if( t.task_id == app_status_data_binding.detect_task.task_id){
-                                            app_status_data_binding.detect_task = t;
-                                            app_status_data_binding.task.process_result =
-                                                "Fail".to_string();
-                                            app_status_data_binding.task.message = format!("Repeating task_id: {}", app_status_data_binding.detect_task.task_id);
-                                            app_status_data_binding.detect_task.retry_count = 0;
+                                            // app_status_data_binding.detect_task = t;
+                                            // app_status_data_binding.task.process_result =  "Fail".to_string();
+                                            // app_status_data_binding.task.message = format!("Repeating task_id: {}", app_status_data_binding.detect_task.task_id);
+                                            // app_status_data_binding.detect_task.retry_count = 0;
+                                            app_status_data_binding.task.cmd_nok_count+=1;
+
                                         }else {
                                             app_status_data_binding.detect_task = t;
                                             app_status_data_binding.task.process_result =
                                                 "Success".to_string();
                                             app_status_data_binding.task.message = "Success".to_string();
+                                            app_status_data_binding.task.cmd_ok_count+=1;
+
                                         }
 
                                     }
@@ -572,6 +579,7 @@ fn main()
                                             "undefined detect_task error: [{}]",
                                             t.cmd_type
                                         );
+                                        app_status_data_binding.task.cmd_nok_count+=1;
                                         app_status_data_binding.detect_task.retry_count = 0;
                                     }
                                 },
@@ -580,6 +588,8 @@ fn main()
                                     app_status_data_binding.task.message =
                                         format!("undefined cmd_type error: [{}]", t.cmd_type);
                                     app_status_data_binding.detect_task.retry_count = 0;
+                                    app_status_data_binding.task.cmd_nok_count+=1;
+
 
                                 }
                             },
@@ -590,6 +600,7 @@ fn main()
                                 app_status_data_binding.task.message =
                                     format!("parse data error: {:?}", e);
                                 app_status_data_binding.detect_task.retry_count = 0;
+                                app_status_data_binding.task.cmd_nok_count+=1;
 
                             }
                         }
@@ -603,6 +614,9 @@ fn main()
                             c"detector_status_pub",
                             &mut [*send_status_biding.get_ptr() as *mut std::os::raw::c_void],
                         );
+                    }else {
+                        app_status_data_binding.task.cmd_nok_count+=1;
+                        // app_status_data_binding.detect_task.retry_count = 0;
                     }
                 }
 
@@ -611,6 +625,7 @@ fn main()
                     app_status_data_binding.task.process = "RunningDetector".to_string();
                     app_status_data_binding.task.process_result = "Running".to_string();
                     app_status_data_binding.task.message = "".to_string();
+                    app_status_data_binding.task.pallet_result.clear();
 
                     *start_detect_cmd.borrow_mut() = true;
                 }
@@ -828,6 +843,7 @@ fn main()
 
                     if (app_status_data_binding.detect_task.retry_count == 0){
                         *start_detect_cmd.borrow_mut() = false;
+                        app_status_data_binding.task.process = "RunningDetector".to_string();
                         if(detect_ok){
                             app_status_data_binding.task.process_result = "Success".to_string();
                             let task_id = app_status_data_binding.detect_task.task_id.clone();
