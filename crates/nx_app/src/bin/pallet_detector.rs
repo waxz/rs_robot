@@ -548,7 +548,6 @@ fn main()
 
 
 
-                        app_status_data_binding.task.process = "ParseCommand".to_string();
                         match toml::from_str::<io_message::AppCmdBase>(&data) {
                             Ok(mut t) => match t.cmd_type.as_str() {
                                 "DetectPallet" => match t.detect_cmd {
@@ -564,6 +563,7 @@ fn main()
 
                                         }else {
                                             app_status_data_binding.detect_task = t;
+                                            app_status_data_binding.task.process = "ParseCommand".to_string();
                                             app_status_data_binding.task.process_result =
                                                 "Success".to_string();
                                             app_status_data_binding.task.message = "Success".to_string();
@@ -573,6 +573,9 @@ fn main()
 
                                     }
                                     _ => {
+
+                                        app_status_data_binding.task.process = "ParseCommand".to_string();
+
                                         app_status_data_binding.task.process_result =
                                             "Fail".to_string();
                                         app_status_data_binding.task.message = format!(
@@ -584,6 +587,8 @@ fn main()
                                     }
                                 },
                                 _ => {
+                                    app_status_data_binding.task.process = "ParseCommand".to_string();
+
                                     app_status_data_binding.task.process_result = "Fail".to_string();
                                     app_status_data_binding.task.message =
                                         format!("undefined cmd_type error: [{}]", t.cmd_type);
@@ -595,6 +600,7 @@ fn main()
                             },
                             Err(e) => {
                                 info!("parse error {}", e);
+                                app_status_data_binding.task.process = "ParseCommand".to_string();
 
                                 app_status_data_binding.task.process_result = "Fail".to_string();
                                 app_status_data_binding.task.message =

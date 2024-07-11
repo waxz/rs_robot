@@ -73,7 +73,7 @@ rpath = true
 members = [ "crates/nx_common",
 #    "crates/nx_practice",
     "crates/nx_message_center",
-#    "crates/nx_robot",
+    "crates/nx_app",
 #    "crates/nx_message_center_test",
     "crates/nx_gui"]
 
