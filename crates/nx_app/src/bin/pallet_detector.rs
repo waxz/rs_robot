@@ -759,11 +759,11 @@ fn main()
 
 
                     let mut extrinsic_enable = extrinsic.enable;
-                    {
-                        if (app_status_data_binding.task.success_count >2 ){
-                            extrinsic_enable = false;
-                        }
-                    }
+                    // {
+                    //     if (app_status_data_binding.task.success_count >2 ){
+                    //         extrinsic_enable = false;
+                    //     }
+                    // }
 
 
                     if(extrinsic_enable){
