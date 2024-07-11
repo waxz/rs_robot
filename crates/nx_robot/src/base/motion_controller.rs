@@ -672,7 +672,6 @@ impl RobotControl for SingleSteeringMotionController
         }
 
         if self.config.use_hardware_controller {
-
             // match self.config.model.as_str() {
             //     Self::MODEL_NAME => {
             //
@@ -680,9 +679,6 @@ impl RobotControl for SingleSteeringMotionController
             //     },
             //     _ =>{}
             // }
-
-
-
 
             #[cfg(aaa)]
             {

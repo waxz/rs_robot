@@ -2726,6 +2726,156 @@ fn bindgen_test_layout_PointCloudBuffer() {
 pub type PointCloudBuffer_ptr = *mut PointCloudBuffer;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct PalletInfo {
+    pub confidence: f32_t,
+    pub info: i32_t,
+    pub tx: f64_t,
+    pub ty: f64_t,
+    pub tz: f64_t,
+    pub roll: f64_t,
+    pub pitch: f64_t,
+    pub yaw: f64_t,
+}
+#[test]
+fn bindgen_test_layout_PalletInfo() {
+    const UNINIT: ::std::mem::MaybeUninit<PalletInfo> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<PalletInfo>(),
+        56usize,
+        concat!("Size of: ", stringify!(PalletInfo))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<PalletInfo>(),
+        8usize,
+        concat!("Alignment of ", stringify!(PalletInfo))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).confidence) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PalletInfo),
+            "::",
+            stringify!(confidence)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).info) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PalletInfo),
+            "::",
+            stringify!(info)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).tx) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PalletInfo),
+            "::",
+            stringify!(tx)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ty) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PalletInfo),
+            "::",
+            stringify!(ty)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).tz) as usize - ptr as usize },
+        24usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PalletInfo),
+            "::",
+            stringify!(tz)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).roll) as usize - ptr as usize },
+        32usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PalletInfo),
+            "::",
+            stringify!(roll)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).pitch) as usize - ptr as usize },
+        40usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PalletInfo),
+            "::",
+            stringify!(pitch)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).yaw) as usize - ptr as usize },
+        48usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PalletInfo),
+            "::",
+            stringify!(yaw)
+        )
+    );
+}
+pub type PalletInfo_ptr = *mut PalletInfo;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct PalletInfoBuffer {
+    pub buffer: PalletInfo_ptr,
+    pub pallet_num: u64_t,
+}
+#[test]
+fn bindgen_test_layout_PalletInfoBuffer() {
+    const UNINIT: ::std::mem::MaybeUninit<PalletInfoBuffer> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<PalletInfoBuffer>(),
+        16usize,
+        concat!("Size of: ", stringify!(PalletInfoBuffer))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<PalletInfoBuffer>(),
+        8usize,
+        concat!("Alignment of ", stringify!(PalletInfoBuffer))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).buffer) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PalletInfoBuffer),
+            "::",
+            stringify!(buffer)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).pallet_num) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(PalletInfoBuffer),
+            "::",
+            stringify!(pallet_num)
+        )
+    );
+}
+pub type PalletInfoBuffer_ptr = *mut PalletInfoBuffer;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct pointcloud_pallet_detector_t {
     pub handler: *mut ::std::os::raw::c_void,
     #[doc = " crete ros node and subscriber and publisher from toml file\n \\param h\n \\param filename"]
@@ -2851,6 +3001,12 @@ pub struct pointcloud_pallet_detector_t {
     pub find_pallet: ::std::option::Option<
         unsafe extern "C" fn(h: *mut pointcloud_pallet_detector_t) -> PointCloudBuffer_ptr,
     >,
+    pub get_pallet: ::std::option::Option<
+        unsafe extern "C" fn(
+            h: *mut pointcloud_pallet_detector_t,
+            output_mode: u32_t,
+        ) -> PalletInfoBuffer_ptr,
+    >,
     pub compute_pallet:
         ::std::option::Option<unsafe extern "C" fn(h: *mut pointcloud_pallet_detector_t)>,
 }
@@ -2861,7 +3017,7 @@ fn bindgen_test_layout_pointcloud_pallet_detector_t() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<pointcloud_pallet_detector_t>(),
-        136usize,
+        144usize,
         concat!("Size of: ", stringify!(pointcloud_pallet_detector_t))
     );
     assert_eq!(
@@ -3030,8 +3186,18 @@ fn bindgen_test_layout_pointcloud_pallet_detector_t() {
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).compute_pallet) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).get_pallet) as usize - ptr as usize },
         128usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(pointcloud_pallet_detector_t),
+            "::",
+            stringify!(get_pallet)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).compute_pallet) as usize - ptr as usize },
+        136usize,
         concat!(
             "Offset of field: ",
             stringify!(pointcloud_pallet_detector_t),

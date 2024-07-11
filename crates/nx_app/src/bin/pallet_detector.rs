@@ -650,6 +650,7 @@ fn main()
         let new_cloud_ready = new_cloud_ready.clone();
         let start_detect_cmd = start_detect_cmd.clone();
         let cloud_msg_count = cloud_msg_count.clone();
+        let app_status_data = app_status_data.clone();
 
         let boot_up_time = boot_up_time;
 
@@ -658,6 +659,8 @@ fn main()
         task_manager.add(
             "recv_cloud",
             move || {
+                let mut app_status_data_binding = app_status_data.borrow_mut();
+
                 let cloud_dim_height = filter.filter_height_max - filter.filter_height_min;
 
                 let cloud_dim_width = (filter.filter_width_max - filter.filter_width_min);
@@ -754,7 +757,16 @@ fn main()
                     mean_window_filter_count = 0;
                     *new_cloud_ready.borrow_mut() = true;
 
-                    if(extrinsic.enable){
+
+                    let mut extrinsic_enable = extrinsic.enable;
+                    {
+                        if (app_status_data_binding.task.success_count >2 ){
+                            extrinsic_enable = false;
+                        }
+                    }
+
+
+                    if(extrinsic_enable){
                         pointcloud_transform(
                             raw_float_vec.as_mut_ptr(),
                             (raw_float_vec.len() as u64) / 3,
@@ -812,6 +824,10 @@ fn main()
                 // info!("run_detector: start_detect_cmd: {}, new_cloud_ready: {}",*start_detect_cmd.borrow(),*new_cloud_ready.borrow() );
 
                 let mut detect_ok = false;
+
+                let new_cloud_ready_condition = *new_cloud_ready.borrow();
+                // *new_cloud_ready.borrow_mut() = false;
+
                 if *start_detect_cmd.borrow() && app_status_data_binding.detect_task.retry_count > 0 && *new_cloud_ready.borrow() {
                     *new_cloud_ready.borrow_mut() = false;
                     let mut binding = pallet_detector_handler.borrow_mut();
@@ -846,6 +862,7 @@ fn main()
                         app_status_data_binding.task.fail_count += 1;
                         app_status_data_binding.detect_task.retry_count -=1;
                     }
+
 
                     if (app_status_data_binding.detect_task.retry_count == 0){
                         *start_detect_cmd.borrow_mut() = false;
@@ -901,10 +918,12 @@ fn main()
                     let mut send_result_poses = send_result.get_mut_data();
                     send_result_poses[0].position.x = send_result_poses[0].position.x + 1.0;
                 }
-                dds_handler.borrow_mut().write_data(
-                    c"detector_result_pub",
-                    &mut [*send_result.get_ptr() as *mut std::os::raw::c_void],
-                );
+                // dds_handler.borrow_mut().write_data(
+                //     c"detector_result_pub",
+                //     &mut [*send_result.get_ptr() as *mut std::os::raw::c_void],
+                // );
+                info!("send app_status_data_str: {}", app_status_data_str.as_str());
+
                 dds_handler.borrow_mut().write_data(
                     c"detector_status_pub",
                     &mut [*send_status.borrow_mut().get_ptr() as *mut std::os::raw::c_void],

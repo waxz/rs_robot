@@ -137,49 +137,77 @@ pub mod shared
             // println!("data_slice_len: {}", data_slice_len);
             let mut inner = unsafe { self.ptr.get().as_mut().unwrap() };
 
-            if data_slice_len != inner.element_size {
-                unsafe {
-                    //void HeaderStringT_set_buffer(HeaderStringT* t, u32_t size){
-                    //     t->element_size = size;
-                    //     t->buffer_size = (size + 1) * sizeof (char);
-                    // }
-                    HeaderString_set_buffer(inner, data_slice_len);
-                }
-                if data_slice_len > inner.element_size {
-                    let ptr = unsafe {
-                        // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+            let ptr = unsafe {
+                // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
 
-                        HeaderString_realloc(data_slice_len, inner, &self.cfg.unwrap())
+                HeaderString_realloc(data_slice_len, inner, &self.cfg.unwrap())
 
-                        // TinyAlloc::realloc::<HeaderStringT>(
-                        //     inner as *mut _ as *mut c_void,
-                        //     (inner.base_size + inner.buffer_size) as usize,
-                        // )
-                    };
-                    self.ptr = UnsafeSender::new(ptr);
-                    inner = unsafe { self.ptr.get().as_mut().unwrap() };
-                    //
-                    // let inner_data = unsafe {
-                    //     slice::from_raw_parts_mut(
-                    //         inner.data.as_mut_ptr(),
-                    //         inner.element_size as usize + 1,
-                    //     )
-                    // };
-                    // inner_data[inner.element_size as usize] = 0;
-                }
-            }
-            // for   (x,y) in izip!( &mut self.inner.data, data_slice) {
-            //     println!("map {} = {}", *x, *y);
-            //     *x = *y as c_char;
-            // }
-            let inner_data = unsafe {
-                slice::from_raw_parts_mut(inner.data.as_mut_ptr(), inner.element_size as usize + 1)
+                // TinyAlloc::realloc::<HeaderStringT>(
+                //     inner as *mut _ as *mut c_void,
+                //     (inner.base_size + inner.buffer_size) as usize,
+                // )
             };
+            self.ptr = UnsafeSender::new(ptr);
+            inner = unsafe { self.ptr.get().as_mut().unwrap() };
 
-            for i in 0..inner.element_size as usize {
-                inner_data[i] = data_slice[i] as c_char;
+            unsafe {
+                std::ptr::copy(
+                    data.as_ptr(),
+                    inner.data.as_mut_ptr() as *mut _,
+                    data.len(),
+                );
+                *inner.data.as_mut_ptr().offset(data_slice.len() as isize) = 0;
             }
-            inner_data[inner.element_size as usize] = 0;
+            // inner.data[data_slice.len()] = 0;
+
+
+            #[cfg(bypass11)]
+            {
+                if data_slice_len != inner.element_size {
+                    unsafe {
+                        //void HeaderStringT_set_buffer(HeaderStringT* t, u32_t size){
+                        //     t->element_size = size;
+                        //     t->buffer_size = (size + 1) * sizeof (char);
+                        // }
+                        crate::binding::HeaderString_set_buffer(inner, data_slice_len);
+                    }
+                    if data_slice_len > inner.element_size {
+                        let ptr = unsafe {
+                            // let cfg = DefaultAllocator::ALLOCATOR.with(|x| x.get().unwrap().cfg);
+
+                            crate::binding::HeaderString_realloc(data_slice_len, inner, &self.cfg.unwrap())
+
+                            // TinyAlloc::realloc::<HeaderStringT>(
+                            //     inner as *mut _ as *mut c_void,
+                            //     (inner.base_size + inner.buffer_size) as usize,
+                            // )
+                        };
+                        self.ptr = UnsafeSender::new(ptr);
+                        inner = unsafe { self.ptr.get().as_mut().unwrap() };
+                        //
+                        // let inner_data = unsafe {
+                        //     slice::from_raw_parts_mut(
+                        //         inner.data.as_mut_ptr(),
+                        //         inner.element_size as usize + 1,
+                        //     )
+                        // };
+                        // inner_data[inner.element_size as usize] = 0;
+                    }
+                }
+                // for   (x,y) in izip!( &mut self.inner.data, data_slice) {
+                //     println!("map {} = {}", *x, *y);
+                //     *x = *y as c_char;
+                // }
+                let inner_data = unsafe {
+                    slice::from_raw_parts_mut(inner.data.as_mut_ptr(), inner.element_size as usize + 1)
+                };
+
+                for i in 0..inner.element_size as usize {
+                    inner_data[i] = data_slice[i] as c_char;
+                }
+                inner_data[inner.element_size as usize] = 0;
+            }
+
 
             // println!("inner_data: {:?}", inner_data);
         }
@@ -388,7 +416,7 @@ pub mod shared
                     data.len(),
                 );
             }
-            // inner.frame_id[data_slice.len()] = 0;
+            inner.frame_id[data_slice.len()] = 0;
             // println!("self.inner.frame_id: {:?}",self.inner.frame_id);
         }
         pub fn get_frame_id(&self) -> ManuallyDrop<String>

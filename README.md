@@ -50,8 +50,25 @@ fn main()
     println!("cargo:rustc-link-arg=-Wl,-rpath,/tmp/cpp-target/install/lib");
 }
 ```
+# usage
 
-# install application in nx_app
+### install application in nx_app
 ```shell
 cargo install --path crates/nx_app  --offline  --root /tmp/cargo-target/install  --bins 
+```
+
+
+### run pallet detection 
+
+A dds_ros_bridge in [cpp_robot](https://github.com/waxz/cpp_robot) needed to be executed first to transform depth camera ros driver message to fastdds.
+
+```shell
+cd /tmp/cargo-target/install/bin 
+./pallet_detector -d ./gui_config.toml -c
+```
+
+### run motion control
+```shell
+/tmp/cargo-target/install/bin
+./ros_motion_control_rerun -r ./comm_config.toml -m ./robot_config.toml
 ```

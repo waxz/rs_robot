@@ -3071,8 +3071,10 @@ impl RobotMotionPlanner
 
                 // failed => None
 
-                if closest_base_node.flow_type >= 10  && (self.global_path.borrow()[closest_base_id].dist_to_segment_end
-                    > opt.valid_line_length){
+                if closest_base_node.flow_type >= 10
+                    && (self.global_path.borrow()[closest_base_id].dist_to_segment_end
+                        > opt.valid_line_length)
+                {
                     task = RobotMotionPlannerTask::Line;
 
                     self.planner_data.borrow_mut().target_start_id = closest_base_id;
@@ -3379,21 +3381,21 @@ impl RobotMotionPlanner
                 let aux_direction = if aux_control_point[0] > 0.0 { 0.0 } else { PI };
 
                 // todo: decrease
-                let current_control_pose_in_target_end_y_abs = current_control_pose_in_target_end_y.abs();
+                let current_control_pose_in_target_end_y_abs =
+                    current_control_pose_in_target_end_y.abs();
                 let mut relative_target_x = if control_pose_in_target_end[0] < -line_switch_dist {
                     // if current_control_pose_in_target_end_y_abs< 0.01{
                     //     line_search_dist + (0.03/(current_control_pose_in_target_end_y_abs + 0.0001)).min(opt.line_search_dist_min)
                     // }else{
                     //     line_search_dist
                     // }
-                    if current_control_pose_in_target_end_y_abs > opt.line_search_converge_dist{
-                        line_search_dist
-                            .min(current_control_pose_in_target_end_y_abs + opt.line_search_dist_min)
-                    }else{
+                    if current_control_pose_in_target_end_y_abs > opt.line_search_converge_dist {
+                        line_search_dist.min(
+                            current_control_pose_in_target_end_y_abs + opt.line_search_dist_min,
+                        )
+                    } else {
                         opt.line_search_converge_ratio * line_search_dist
                     }
-
-
                 } else {
                     10.0 * line_search_dist
                 };
@@ -3426,38 +3428,44 @@ impl RobotMotionPlanner
 
                     let mut control_pose_in_target_end_fix = control_pose_in_target_end;
 
-
-                    if is_goal_line{
-                        if opt.constrain_stop_no_rotate && (current_pose_in_target_end[0] > -opt.constrain_stop_no_rotate_run_dist) {
+                    if is_goal_line {
+                        if opt.constrain_stop_no_rotate
+                            && (current_pose_in_target_end[0]
+                                > -opt.constrain_stop_no_rotate_run_dist)
+                        {
                             if opt.final_force_parallel_direction {
                                 control_pose_in_target_end_fix[1] = (control_pose_in_target_end[1]);
-                                control_pose_in_target_end_fix[0] = control_pose_in_target_end[0] + relative_target_x;
-                            }else{
-
+                                control_pose_in_target_end_fix[0] =
+                                    control_pose_in_target_end[0] + relative_target_x;
+                            } else {
                                 control_pose_in_target_end_fix[1] = 0.0;
-                                control_pose_in_target_end_fix[0] = control_pose_in_target_end[0] + opt.final_relative_target_x;
+                                control_pose_in_target_end_fix[0] = control_pose_in_target_end[0]
+                                    + if control_pose_in_target_end[0] < -line_switch_dist {
+                                        opt.final_relative_target_x
+                                    } else {
+                                        10.0 * opt.final_relative_target_x
+                                    }
                             }
-                        } else{
-                            control_pose_in_target_end_fix[0] = control_pose_in_target_end[0] + relative_target_x;
+                        } else {
+                            control_pose_in_target_end_fix[0] =
+                                control_pose_in_target_end[0] + relative_target_x;
                             control_pose_in_target_end_fix[1] = 0.0;
                         }
-                    }else{
-                        control_pose_in_target_end_fix[0] = control_pose_in_target_end[0] + relative_target_x;
+                    } else {
+                        control_pose_in_target_end_fix[0] =
+                            control_pose_in_target_end[0] + relative_target_x;
                         //todo: avoid rotate
-                        if current_control_pose_in_target_end_y_abs > opt.line_search_converge_dist{
+                        if current_control_pose_in_target_end_y_abs > opt.line_search_converge_dist
+                        {
                             control_pose_in_target_end_fix[1] = 0.0;
-
-                        }else{
-                            control_pose_in_target_end_fix[1] = 0.5*(control_pose_in_target_end[1]);
+                        } else {
+                            control_pose_in_target_end_fix[1] =
+                                0.5 * (control_pose_in_target_end[1]);
                         }
                         control_pose_in_target_end_fix[1] = 0.0;
-
                     }
 
-
                     // control_pose_in_target_end_fix[1] = 0.0;
-
-
 
                     let mut target_posed = target_end_node
                         .flow_pose
@@ -3478,11 +3486,12 @@ impl RobotMotionPlanner
                 // }
 
                 if (current_target_in_control_pose[0] > 0.0) && (aux_control_point[0] < 0.0) {
-                    current_target_in_control_pose[0] = -1e-3* current_target_in_control_pose[1].abs();
-
+                    current_target_in_control_pose[0] =
+                        -1e-3 * current_target_in_control_pose[1].abs();
                 } else if (current_target_in_control_pose[0] < 0.0) && (aux_control_point[0] > 0.0)
                 {
-                    current_target_in_control_pose[0] = 1e-3* current_target_in_control_pose[1].abs();
+                    current_target_in_control_pose[0] =
+                        1e-3 * current_target_in_control_pose[1].abs();
                 }
 
                 // current_target_in_control_pose[0] = (aux_control_point[0]  ).copysign(aux_control_point[0]);
@@ -3617,10 +3626,8 @@ impl RobotMotionPlanner
                     .flow_pose_inv
                     .multiply_pose(&aux_control_point_abs);
 
-                let current_pose_in_target_end = target_end_node
-                    .flow_pose_inv
-                    .multiply_pose(&current_pose);
-
+                let current_pose_in_target_end =
+                    target_end_node.flow_pose_inv.multiply_pose(&current_pose);
 
                 let (_, current_control_pose_in_target_end_y) =
                     self.current_control_pose_in_target_end_y.borrow().mean();
@@ -3703,9 +3710,6 @@ impl RobotMotionPlanner
                     );
                 }
 
-
-
-
                 let reach_end =
                     //control_pose_in_target_end[1].abs() < opt.switch_line_dist
                     ((closest_base_node.dist_to_end - target_end_node.dist_to_end) < opt.switch_line_path_dist)
@@ -3721,8 +3725,12 @@ impl RobotMotionPlanner
                 // warn!("reach_end: {}, control_pose_in_target_end: {:?},path_dist: {} ,switch_line_path_dist: {} ",reach_end,control_pose_in_target_end,closest_base_node.dist_to_end - target_end_node.dist_to_end, opt.switch_line_path_dist);
 
                 warn!(
-                    reach_end,?current_pose_in_target_end,target_start_id,target_end_id,
-                    current_driver_cmd_vy, current_control_pose_in_target_end_y
+                    reach_end,
+                    ?current_pose_in_target_end,
+                    target_start_id,
+                    target_end_id,
+                    current_driver_cmd_vy,
+                    current_control_pose_in_target_end_y
                 );
                 if !reach_end {
                     let current_target_in_control_pose = self.search_curve(opt);
